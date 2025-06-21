@@ -34,17 +34,17 @@ router.post('/', async (req, res) => {
                 const recipientId = messaging.recipient.id;
                 const messageText = messaging.message.text;
 
-                console.log('📥 New message:', messageText);
-
+                // Lưu tin nhắn vào DB
                 await Message.create({
-                    pageId: recipientId,
+                    pageId: recipientId, // recipient là page
                     senderId,
                     recipientId,
                     message: messageText,
-                    direction: 'in',
+                    direction: 'in', // tin nhắn vào page
                     timestamp: new Date()
                 });
 
+                // Phát realtime nếu cần
                 req.io.emit('fb_message', {
                     pageId: recipientId,
                     senderId,
@@ -54,6 +54,7 @@ router.post('/', async (req, res) => {
         }
         res.status(200).send('EVENT_RECEIVED');
     } else {
+        console.log('❌ Unsupported object:', body.object);
         res.sendStatus(404);
     }
 });
