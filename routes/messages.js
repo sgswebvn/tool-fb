@@ -39,7 +39,7 @@ module.exports = (io) => {
                 );
                 messagesByConversation.push({
                     conversationId: conv.id,
-                    messages: messages.data.map((msg: any, index: number) => ({
+                    messages: messages.data.map((msg, index) => ({ // Loại bỏ : any, : number
                         id: msg.id || `${conv.id}_${index}`, // Đảm bảo id duy nhất
                         senderId: msg.from.id,
                         recipientId: msg.to.id,
