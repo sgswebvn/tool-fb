@@ -19,7 +19,10 @@ app.use((req, res, next) => {
     next();
 });
 
-app.use(cors());
+app.use(cors({
+    origin: ['http://localhost:3000', 'https://your-frontend-domain.com'],
+    credentials: true,
+}));
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
