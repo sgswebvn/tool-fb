@@ -31,25 +31,26 @@ module.exports = (io) => {
                 { params: { access_token: page.access_token, limit: 10 } }
             );
 
-            const messagesByConversation = [];
-            for (const conv of conversations.data) {
-                const { data: messages } = await axios.get(
-                    `https://graph.facebook.com/v18.0/${conv.id}/messages`,
-                    { params: { access_token: page.access_token, fields: 'message,from,to,created_time,attachments' } }
-                );
-                messagesByConversation.push({
-                    conversationId: conv.id,
-                    messages: messages.data.map((msg, index) => ({ // Loại bỏ : any, : number
-                        id: msg.id || `${conv.id}_${index}`, // Đảm bảo id duy nhất
-                        senderId: msg.from.id,
-                        senderName: msg.from.name,
-                        recipientId: msg.to.id,
-                        message: msg.message,
-                        timestamp: msg.created_time,
-                        direction: msg.from.id === pageId ? 'out' : 'in',
-                    })),
-                });
-            }
+            const messagesByConversation = await Promise.all(
+                conversations.data.map(async (conv) => {
+                    const { data: messages } = await axios.get(
+                        `https://graph.facebook.com/v18.0/${conv.id}/messages`,
+                        { params: { access_token: page.access_token, fields: 'message,from,to,created_time,attachments', limit: 20 } }
+                    );
+                    return {
+                        conversationId: conv.id,
+                        messages: messages.data.map((msg, index) => ({
+                            id: msg.id || `${conv.id}_${index}`,
+                            senderId: msg.from.id,
+                            senderName: msg.from.name,
+                            recipientId: msg.to.id,
+                            message: msg.message,
+                            timestamp: msg.created_time,
+                            direction: msg.from.id === pageId ? 'out' : 'in',
+                        })),
+                    };
+                })
+            );
 
             res.json(messagesByConversation);
         } catch (err) {
@@ -82,14 +83,26 @@ module.exports = (io) => {
             }
 
             // Lưu vào DB
-            await Message.create({
+            // Sau khi lưu vào DB
+            const newMsg = await Message.create({
                 pageId,
                 senderId: 'page',
-                senderName: page.name || "Page", // hoặc tên page
+                senderName: page.name || "Page",
                 recipientId,
                 message,
                 direction: 'out',
-                // Nếu muốn lưu tên người nhận thì thêm recipientName
+                timestamp: new Date()
+            });
+
+            // Emit realtime cho tất cả client đang ở pageId này
+            req.io.to(pageId).emit('fb_message', {
+                pageId,
+                senderId: 'page',
+                message,
+                direction: 'out',
+                timestamp: newMsg.timestamp,
+                senderName: page.name || "Page",
+                recipientId
             });
 
             res.json({ success: true });
