@@ -44,4 +44,13 @@ router.get('/facebook/callback', async (req, res) => {
     }
 });
 
+router.get('/pages', async (req, res) => {
+    try {
+        const pages = await Page.find();
+        res.json(pages);
+    } catch (err) {
+        console.error('❌ Error fetching pages:', err);
+        res.status(500).json({ error: 'Failed to fetch pages' });
+    }
+});
 module.exports = router;

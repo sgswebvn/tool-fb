@@ -1,0 +1,1 @@
+git add . -- ':!node_modules' ':!.env'

@@ -2,7 +2,6 @@ const express = require('express');
 const router = express.Router();
 const Message = require('../models/Message');
 
-const VERIFY_TOKEN = 'fbverify';
 
 // 📁 webhook.js
 router.get('/', (req, res) => {

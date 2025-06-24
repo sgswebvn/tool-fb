@@ -6,6 +6,16 @@ const Message = require('../models/Message');
 module.exports = (io) => {
     const router = express.Router();
 
+    io.on("connection", (socket) => {
+        socket.on("join", (data) => {
+            socket.join(data.pageId); // Tham gia room theo pageId
+            console.log(`User joined room: ${data.pageId}`);
+        });
+
+        socket.on("disconnect", () => {
+            console.log("User disconnected");
+        });
+    });
     router.get('/', async (req, res) => {
         const messages = await Message.find().sort({ timestamp: -1 });
         res.json(messages);
@@ -19,7 +29,7 @@ module.exports = (io) => {
             // Lấy danh sách hội thoại
             const { data: conversations } = await axios.get(
                 `https://graph.facebook.com/v18.0/${pageId}/conversations`,
-                { params: { access_token: page.access_token, limit: 10 } } // lấy 5 hội thoại gần nhất
+                { params: { access_token: page.access_token, limit: 10 } }
             );
 
             // Lấy tin nhắn của từng hội thoại (ví dụ: chỉ lấy hội thoại đầu tiên)
