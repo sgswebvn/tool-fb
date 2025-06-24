@@ -28,33 +28,33 @@ router.post('/', async (req, res) => {
 
     if (body.object === 'page') {
         for (const entry of body.entry) {
-            const messaging = entry.messaging?.[0];
-            if (messaging?.message?.text) {
-                const senderId = messaging.sender.id;
-                const recipientId = messaging.recipient.id;
-                const messageText = messaging.message.text;
+            const messaging = entry.messaging;
+            for (const msg of messaging) {
+                if (msg.message && msg.message.text) {
+                    const senderId = msg.sender.id;
+                    const recipientId = msg.recipient.id;
+                    const messageText = msg.message.text;
 
-                // Lưu tin nhắn vào DB
-                await Message.create({
-                    pageId: recipientId, // recipient là page
-                    senderId,
-                    recipientId,
-                    message: messageText,
-                    direction: 'in', // tin nhắn vào page
-                    timestamp: new Date()
-                });
+                    await Message.create({
+                        pageId: recipientId,
+                        senderId,
+                        recipientId,
+                        message: messageText,
+                        direction: 'in',
+                        timestamp: new Date()
+                    });
 
-                // Phát realtime nếu cần
-                req.io.emit('fb_message', {
-                    pageId: recipientId,
-                    senderId,
-                    message: messageText
-                });
+                    req.io.emit('fb_message', {
+                        pageId: recipientId,
+                        senderId,
+                        message: messageText
+                    });
+                }
             }
         }
         res.status(200).send('EVENT_RECEIVED');
     } else {
-        console.log('❌ Unsupported object:', body.object);
+        console.log('❌ Invalid webhook event:', body);
         res.sendStatus(404);
     }
 });
