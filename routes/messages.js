@@ -82,7 +82,6 @@ module.exports = (io) => {
                 recipientName = "";
             }
 
-            // Lưu vào DB
             // Sau khi lưu vào DB
             const newMsg = await Message.create({
                 pageId,
