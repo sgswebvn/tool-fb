@@ -82,7 +82,6 @@ module.exports = (io) => {
                 recipientName = "";
             }
 
-            // Sau khi lưu vào DB
             const newMsg = await Message.create({
                 pageId,
                 senderId: 'page',
@@ -94,14 +93,14 @@ module.exports = (io) => {
             });
 
             // Emit realtime cho tất cả client đang ở pageId này
-            req.io.to(pageId).emit('fb_message', {
+            io.to(pageId).emit('fb_message', {
                 pageId,
                 senderId: 'page',
-                message,
-                direction: 'out',
-                timestamp: newMsg.timestamp,
                 senderName: page.name || "Page",
-                recipientId
+                recipientId: recipientId,
+                message: message,
+                direction: 'out',
+                timestamp: newMsg.timestamp
             });
 
             res.json({ success: true });
