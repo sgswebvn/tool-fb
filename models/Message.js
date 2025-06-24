@@ -3,6 +3,7 @@ const { Schema, model } = require('mongoose');
 const messageSchema = new Schema({
     pageId: String,
     senderId: String,
+    senderName: String,
     recipientId: String,
     message: String,
     direction: { type: String, enum: ['in', 'out'] },

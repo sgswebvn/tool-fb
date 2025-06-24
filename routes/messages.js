@@ -42,6 +42,7 @@ module.exports = (io) => {
                     messages: messages.data.map((msg, index) => ({ // Loại bỏ : any, : number
                         id: msg.id || `${conv.id}_${index}`, // Đảm bảo id duy nhất
                         senderId: msg.from.id,
+                        senderName: msg.from.name,
                         recipientId: msg.to.id,
                         message: msg.message,
                         timestamp: msg.created_time,
@@ -63,17 +64,32 @@ module.exports = (io) => {
             const page = await Page.findOne({ pageId });
             if (!page) return res.status(404).json({ error: 'Page not found' });
 
+            // Gửi tin nhắn tới Facebook
             await axios.post(`https://graph.facebook.com/v18.0/me/messages?access_token=${page.access_token}`, {
                 recipient: { id: recipientId },
                 message: { text: message }
             });
 
+            // Lấy tên người nhận từ Facebook Graph API
+            let recipientName = "";
+            try {
+                const { data } = await axios.get(`https://graph.facebook.com/${recipientId}`, {
+                    params: { access_token: page.access_token, fields: "name" }
+                });
+                recipientName = data.name || "";
+            } catch (e) {
+                recipientName = "";
+            }
+
+            // Lưu vào DB
             await Message.create({
                 pageId,
                 senderId: 'page',
+                senderName: page.name || "Page", // hoặc tên page
                 recipientId,
                 message,
-                direction: 'out'
+                direction: 'out',
+                // Nếu muốn lưu tên người nhận thì thêm recipientName
             });
 
             res.json({ success: true });
