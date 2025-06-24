@@ -26,27 +26,27 @@ module.exports = (io) => {
             const page = await Page.findOne({ pageId });
             if (!page) return res.status(404).json({ error: 'Page not found' });
 
-            // Lấy danh sách hội thoại
             const { data: conversations } = await axios.get(
                 `https://graph.facebook.com/v18.0/${pageId}/conversations`,
                 { params: { access_token: page.access_token, limit: 10 } }
             );
 
-            // Lấy tin nhắn của từng hội thoại (ví dụ: chỉ lấy hội thoại đầu tiên)
             const messagesByConversation = [];
             for (const conv of conversations.data) {
                 const { data: messages } = await axios.get(
                     `https://graph.facebook.com/v18.0/${conv.id}/messages`,
-                    {
-                        params: {
-                            access_token: page.access_token,
-                            fields: 'message,from,to,created_time,attachments'
-                        }
-                    }
+                    { params: { access_token: page.access_token, fields: 'message,from,to,created_time,attachments' } }
                 );
                 messagesByConversation.push({
                     conversationId: conv.id,
-                    messages: messages.data
+                    messages: messages.data.map((msg: any, index: number) => ({
+                        id: msg.id || `${conv.id}_${index}`, // Đảm bảo id duy nhất
+                        senderId: msg.from.id,
+                        recipientId: msg.to.id,
+                        message: msg.message,
+                        timestamp: msg.created_time,
+                        direction: msg.from.id === pageId ? 'out' : 'in',
+                    })),
                 });
             }
 
@@ -83,5 +83,21 @@ module.exports = (io) => {
         }
     });
 
+    router.post('/:messageId/follow', async (req, res) => {
+        const { messageId } = req.params;
+        const { pageId, followed } = req.body;
+        try {
+            const message = await Message.findOneAndUpdate(
+                { _id: messageId, pageId },
+                { followed },
+                { new: true }
+            );
+            if (!message) return res.status(404).json({ error: 'Message not found' });
+            res.json(message);
+        } catch (err) {
+            console.error('❌ Error updating follow status:', err);
+            res.status(500).json({ error: 'Failed to update follow status' });
+        }
+    });
     return router;
 };
