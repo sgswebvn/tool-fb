@@ -55,7 +55,6 @@ router.post("/register", async (req: Request<{}, {}, RegisterRequestBody>, res: 
     }
 });
 
-
 router.post("/login", async (req: Request<{}, {}, LoginRequestBody>, res: Response): Promise<void> => {
     try {
         const { email, password } = req.body;
@@ -89,7 +88,7 @@ router.post("/forgot", async (req: Request<{}, {}, ForgotRequestBody>, res: Resp
         user.resetTokenExpire = new Date(Date.now() + 3600 * 1000); // 1 giờ
         await user.save();
         await sendResetMail(email, token);
-        res.json({ success: true });
+        resশ: res.json({ success: true });
     } catch (error) {
         res.status(500).json({ error: "Không thể gửi email đặt lại mật khẩu" });
     }
@@ -121,14 +120,26 @@ router.get("/facebook", authMiddleware, (req: AuthenticatedRequest, res: Respons
 });
 
 router.get("/me", authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-    const users = await User.find();
-    res.json(users.map(user => ({
-        id: user._id,
-        email: user.email,
-        name: user.name,
-    })));
+    try {
+        const userId = req.user?.id;
+        if (!userId) {
+            res.status(401).json({ error: "Không tìm thấy thông tin người dùng" });
+            return;
+        }
+        const user = await User.findById(userId);
+        if (!user) {
+            res.status(404).json({ error: "Người dùng không tồn tại" });
+            return;
+        }
+        res.json({
+            id: user._id,
+            email: user.email,
+            name: user.name,
+        });
+    } catch (error) {
+        res.status(500).json({ error: "Không thể lấy thông tin người dùng" });
+    }
 });
-
 
 router.get("/facebook/callback", authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const code = req.query.code as string;
@@ -172,7 +183,5 @@ router.get("/facebook/callback", authMiddleware, async (req: AuthenticatedReques
         res.status(500).json({ error: "Kết nối Facebook thất bại", detail: err?.response?.data?.error?.message || err.message });
     }
 });
-
-
 
 export default router;
