@@ -204,9 +204,14 @@ export default (io: Server) => {
     });
 
     router.post("/:messageId/follow", authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-        const { messageId } = req.params as MessageParams;
+        const messageId = req.params.messageId; // Truy cập trực tiếp
         const { pageId, followed } = req.body as FollowRequestBody;
         const userId = req.user?.id;
+
+        if (!messageId) {
+            res.status(400).json({ error: "Thiếu messageId trong params" });
+            return;
+        }
 
         try {
             if (!pageId || followed === undefined) {
