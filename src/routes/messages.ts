@@ -130,6 +130,7 @@ export default (io: Server) => {
             await axios.post(
                 `https://graph.facebook.com/v18.0/me/messages?access_token=${page.access_token}`,
                 {
+                    messaging_type: "RESPONSE",
                     recipient: { id: recipientId },
                     message: { text: message },
                 }
@@ -156,9 +157,9 @@ export default (io: Server) => {
             });
 
             res.json({ success: true });
-        } catch (err) {
-            console.error("❌ Lỗi khi gửi tin nhắn:", err);
-            res.status(500).json({ error: "Không thể gửi tin nhắn" });
+        } catch (err: any) {
+            console.error("❌ Lỗi khi gửi tin nhắn:", err?.response?.data || err.message || err);
+            res.status(500).json({ error: "Không thể gửi tin nhắn", detail: err?.response?.data || err.message || err });
         }
     });
 

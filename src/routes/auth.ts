@@ -146,7 +146,7 @@ router.get("/facebook/callback", async (req: Request, res: Response): Promise<vo
                 { upsert: true }
             );
         }
-        res.redirect("/messages"); // hoặc trả về JSON nếu là API
+        res.redirect("http://localhost:3000/messages"); // hoặc trả về JSON nếu là API
     } catch (err) {
         console.error("❌ Facebook login error:", err);
         res.status(500).json({ error: "Facebook login failed" });
