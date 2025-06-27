@@ -16,9 +16,9 @@ app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
 app.use("/auth", authRoutes);
-app.use("/pages", authMiddleware, pageRoutes);
-app.use("/posts", authMiddleware, postRoutes);
-app.use("/comments", authMiddleware, commentRoutes);
+app.use("/pages", pageRoutes);
+app.use("/posts", postRoutes);
+app.use("/comments", commentRoutes);
 app.use("/webhook", webhookRoutes);
 
 export default app;
