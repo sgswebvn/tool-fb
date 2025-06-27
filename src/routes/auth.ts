@@ -1,14 +1,15 @@
-import express, { Request, Response, NextFunction } from "express";
+import express, { Request, Response } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import axios from "axios";
+import crypto from "crypto";
 import User from "../models/User";
 import Page from "../models/Page";
 import { sendResetMail } from "../services/mailer";
+import { authMiddleware } from "../middleware/auth";
 
 const router = express.Router();
 
-// Định nghĩa interface cho body của request
 interface RegisterRequestBody {
     email: string;
     password: string;
@@ -29,12 +30,15 @@ interface ResetRequestBody {
     password: string;
 }
 
-// Đăng ký
+interface AuthenticatedRequest extends Request {
+    user?: { id: string; username: string };
+}
+
 router.post("/register", async (req: Request<{}, {}, RegisterRequestBody>, res: Response): Promise<void> => {
     try {
         const { email, password, name } = req.body;
         if (!email || !password || !name) {
-            res.status(400).json({ error: "Thiếu thông tin" });
+            res.status(400).json({ error: "Thiếu thông tin bắt buộc" });
             return;
         }
         const existing = await User.findOne({ email });
@@ -44,13 +48,13 @@ router.post("/register", async (req: Request<{}, {}, RegisterRequestBody>, res: 
         }
         const hash = await bcrypt.hash(password, 10);
         const user = await User.create({ email, password: hash, name });
-        res.json({ success: true, user: { id: user._id, email: user.email, name: user.name } });
+        const token = jwt.sign({ id: user._id, username: name }, process.env.JWT_SECRET!, { expiresIn: "7d" });
+        res.json({ success: true, token, user: { id: user._id, email: user.email, name: user.name } });
     } catch (error) {
-        res.status(500).json({ error: "Lỗi máy chủ" });
+        res.status(500).json({ error: "Đăng ký thất bại" });
     }
 });
 
-// Đăng nhập
 router.post("/login", async (req: Request<{}, {}, LoginRequestBody>, res: Response): Promise<void> => {
     try {
         const { email, password } = req.body;
@@ -64,14 +68,13 @@ router.post("/login", async (req: Request<{}, {}, LoginRequestBody>, res: Respon
             res.status(400).json({ error: "Sai mật khẩu" });
             return;
         }
-        const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET || "secret", { expiresIn: "7d" });
+        const token = jwt.sign({ id: user._id, username: user.name }, process.env.JWT_SECRET!, { expiresIn: "7d" });
         res.json({ token, user: { id: user._id, email: user.email, name: user.name } });
     } catch (error) {
-        res.status(500).json({ error: "Lỗi máy chủ" });
+        res.status(500).json({ error: "Đăng nhập thất bại" });
     }
 });
 
-// Quên mật khẩu
 router.post("/forgot", async (req: Request<{}, {}, ForgotRequestBody>, res: Response): Promise<void> => {
     try {
         const { email } = req.body;
@@ -80,18 +83,17 @@ router.post("/forgot", async (req: Request<{}, {}, ForgotRequestBody>, res: Resp
             res.status(400).json({ error: "Không tìm thấy tài khoản" });
             return;
         }
-        const token = Math.random().toString(36).substring(2, 15);
+        const token = crypto.randomBytes(20).toString("hex");
         user.resetToken = token;
-        user.resetTokenExpire = new Date(Date.now() + 3600 * 1000);
+        user.resetTokenExpire = new Date(Date.now() + 3600 * 1000); // 1 giờ
         await user.save();
         await sendResetMail(email, token);
         res.json({ success: true });
     } catch (error) {
-        res.status(500).json({ error: "Lỗi máy chủ" });
+        res.status(500).json({ error: "Không thể gửi email đặt lại mật khẩu" });
     }
 });
 
-// Đặt lại mật khẩu
 router.post("/reset", async (req: Request<{}, {}, ResetRequestBody>, res: Response): Promise<void> => {
     try {
         const { token, password } = req.body;
@@ -106,19 +108,26 @@ router.post("/reset", async (req: Request<{}, {}, ResetRequestBody>, res: Respon
         await user.save();
         res.json({ success: true });
     } catch (error) {
-        res.status(500).json({ error: "Lỗi máy chủ" });
+        res.status(500).json({ error: "Đặt lại mật khẩu thất bại" });
     }
 });
 
-// Kết nối Facebook (OAuth)
-router.get("/facebook", (req: Request, res: Response): void => {
-    const redirect_uri = `https://www.facebook.com/v18.0/dialog/oauth?client_id=${process.env.FB_APP_ID}&redirect_uri=${process.env.FB_REDIRECT_URI}&scope=pages_messaging,pages_manage_posts,pages_read_engagement,pages_manage_metadata,pages_read_user_content&response_type=code`;
-    res.redirect(redirect_uri);
+router.get("/facebook", authMiddleware, (req: AuthenticatedRequest, res: Response) => {
+    const redirectUri = process.env.FB_REDIRECT_URI || "https://backend-fb-xevu.onrender.com/auth/facebook/callback";
+    const scope = "pages_messaging,pages_show_list";
+    const authUrl = `https://www.facebook.com/v18.0/dialog/oauth?client_id=${process.env.FB_APP_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}&state=${req.query.state}`;
+    res.redirect(authUrl);
 });
 
-// Callback Facebook OAuth
-router.get("/facebook/callback", async (req: Request, res: Response): Promise<void> => {
+router.get("/facebook/callback", authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const code = req.query.code as string;
+    const userId = req.user?.id;
+
+    if (!userId) {
+        res.status(401).json({ error: "Người dùng chưa đăng nhập" });
+        return;
+    }
+
     try {
         const { data: tokenData } = await axios.get(`https://graph.facebook.com/v18.0/oauth/access_token`, {
             params: {
@@ -128,28 +137,28 @@ router.get("/facebook/callback", async (req: Request, res: Response): Promise<vo
                 code,
             },
         });
-        const { data: me } = await axios.get(`https://graph.facebook.com/me?access_token=${tokenData.access_token}`);
+
         const { data: pages } = await axios.get(`https://graph.facebook.com/me/accounts?access_token=${tokenData.access_token}`);
 
-        // TODO: Lấy userId từ session/JWT nếu đã đăng nhập
-        // const userId = (req as any).user.id;
         for (const page of pages.data) {
             await Page.updateOne(
-                { pageId: page.id },
+                { pageId: page.id, userId },
                 {
-                    // userId,
+                    userId,
                     pageId: page.id,
                     name: page.name,
                     access_token: page.access_token,
+                    expires_in: tokenData.expires_in || 5184000,
                     connected_at: new Date(),
                 },
                 { upsert: true }
             );
         }
-        res.redirect("http://localhost:3000/messages"); // hoặc trả về JSON nếu là API
-    } catch (err) {
-        console.error("❌ Facebook login error:", err);
-        res.status(500).json({ error: "Facebook login failed" });
+
+        res.redirect("http://localhost:3000/messages");
+    } catch (err: any) {
+        console.error("❌ Facebook login error:", err?.response?.data || err.message);
+        res.status(500).json({ error: "Kết nối Facebook thất bại", detail: err?.response?.data?.error?.message || err.message });
     }
 });
 

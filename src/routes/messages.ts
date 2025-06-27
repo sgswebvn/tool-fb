@@ -1,10 +1,14 @@
-import express, { Request, Response, NextFunction } from "express";
+import express, { Request, Response } from "express";
 import axios from "axios";
-import { Server, Socket } from "socket.io"; // Nhập kiểu từ socket.io
+import { Server, Socket } from "socket.io";
 import Page from "../models/Page";
 import Message from "../models/Message";
+import { authMiddleware } from "../middleware/auth";
 
-// Định nghĩa interface cho dữ liệu từ req.body và req.params
+interface AuthenticatedRequest extends Request {
+    user?: { id: string; username: string };
+}
+
 interface ReplyRequestBody {
     pageId: string;
     recipientId: string;
@@ -20,10 +24,8 @@ interface MessageParams {
     messageId: string;
 }
 
-// Định nghĩa interface cho dữ liệu từ Facebook API
 interface FacebookConversation {
     id: string;
-    // Thêm các trường khác nếu cần
 }
 
 interface FacebookMessage {
@@ -32,10 +34,9 @@ interface FacebookMessage {
     from: { id: string; name: string };
     to: { id: string };
     created_time: string;
-    attachments?: any; // Có thể định nghĩa chi tiết hơn nếu cần
+    attachments?: any;
 }
 
-// Định nghĩa interface cho Socket.IO data
 interface JoinData {
     pageId: string;
 }
@@ -43,33 +44,35 @@ interface JoinData {
 export default (io: Server) => {
     const router = express.Router();
 
-    // Xử lý sự kiện Socket.IO
     io.on("connection", (socket: Socket) => {
         socket.on("join", (data: JoinData) => {
             socket.join(data.pageId);
         });
-        socket.on("disconnect", () => {
-            // Có thể thêm logic xử lý khi client ngắt kết nối
-        });
+        socket.on("disconnect", () => { });
     });
 
-    // Lấy tất cả messages (có thể phân trang)
-    router.get("/", async (req: Request, res: Response): Promise<void> => {
+    router.get("/", authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
         try {
-            const messages = await Message.find().sort({ timestamp: -1 });
+            const messages = await Message.find({ userId: req.user?.id }).sort({ timestamp: -1 });
             res.json(messages);
         } catch (error) {
             res.status(500).json({ error: "Lỗi máy chủ" });
         }
     });
 
-    // Lấy messages từ Facebook cho page
-    router.get("/fb/:pageId", async (req: Request<{ pageId: string }>, res: Response): Promise<void> => {
+    router.get("/fb/:pageId", authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
         const { pageId } = req.params;
+        const userId = req.user?.id;
+
         try {
-            const page = await Page.findOne({ pageId });
+            const page = await Page.findOne({ pageId, userId });
             if (!page) {
-                res.status(404).json({ error: "Không tìm thấy page" });
+                res.status(404).json({ error: "Không tìm thấy page hoặc bạn không có quyền truy cập" });
+                return;
+            }
+
+            if (page.expires_in && new Date().getTime() > new Date(page.connected_at).getTime() + page.expires_in * 1000) {
+                res.status(400).json({ error: "Token của trang đã hết hạn. Vui lòng kết nối lại qua Facebook." });
                 return;
             }
 
@@ -106,37 +109,60 @@ export default (io: Server) => {
             );
 
             res.json(messagesByConversation);
-        } catch (err) {
-            console.error("❌ Lỗi khi lấy tin nhắn từ Facebook:", err);
-            res.status(500).json({ error: "Không thể lấy tin nhắn từ Facebook" });
+        } catch (err: any) {
+            console.error("❌ Lỗi khi lấy tin nhắn từ Facebook:", err?.response?.data || err.message);
+            res.status(500).json({ error: "Không thể lấy tin nhắn từ Facebook", detail: err?.response?.data?.error?.message || err.message });
         }
     });
 
-    // Gửi tin nhắn từ page tới user
-    router.post("/reply", async (req: Request<{}, {}, ReplyRequestBody>, res: Response): Promise<void> => {
-        const { pageId, recipientId, message } = req.body;
+    router.post("/reply", authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+        const { pageId, recipientId, message } = req.body as ReplyRequestBody;
+        const userId = req.user?.id;
+
         try {
             if (!pageId || !recipientId || !message) {
                 res.status(400).json({ error: "Thiếu thông tin cần thiết" });
                 return;
             }
 
-            const page = await Page.findOne({ pageId });
+            const page = await Page.findOne({ pageId, userId });
             if (!page) {
-                res.status(404).json({ error: "Không tìm thấy page" });
+                res.status(404).json({ error: "Không tìm thấy page hoặc bạn không có quyền truy cập" });
                 return;
+            }
+
+            if (page.expires_in && new Date().getTime() > new Date(page.connected_at).getTime() + page.expires_in * 1000) {
+                res.status(400).json({ error: "Token của trang đã hết hạn. Vui lòng kết nối lại qua Facebook." });
+                return;
+            }
+
+            const lastMessage = await Message.findOne({
+                pageId,
+                senderId: recipientId,
+                direction: "in",
+            }).sort({ timestamp: -1 });
+
+            const isWithin24Hours = lastMessage && (new Date().getTime() - new Date(lastMessage.timestamp).getTime()) <= 24 * 60 * 60 * 1000;
+
+            const payload: any = {
+                recipient: { id: recipientId },
+                message: { text: message },
+            };
+
+            if (!isWithin24Hours) {
+                payload.messaging_type = "MESSAGE_TAG";
+                payload.tag = "ACCOUNT_UPDATE";
+            } else {
+                payload.messaging_type = "RESPONSE";
             }
 
             await axios.post(
                 `https://graph.facebook.com/v18.0/me/messages?access_token=${page.access_token}`,
-                {
-                    messaging_type: "RESPONSE",
-                    recipient: { id: recipientId },
-                    message: { text: message },
-                }
+                payload
             );
 
             const newMsg = await Message.create({
+                userId,
                 pageId,
                 senderId: "page",
                 senderName: page.name || "Page",
@@ -158,23 +184,44 @@ export default (io: Server) => {
 
             res.json({ success: true });
         } catch (err: any) {
-            console.error("❌ Lỗi khi gửi tin nhắn:", err?.response?.data || err.message || err);
-            res.status(500).json({ error: "Không thể gửi tin nhắn", detail: err?.response?.data || err.message || err });
+            console.error("❌ Lỗi khi gửi tin nhắn:", err?.response?.data || err.message);
+            const errorMessage = err.response?.data?.error?.message || "Không thể gửi tin nhắn";
+            const errorCode = err.response?.data?.error?.code;
+            if (errorCode === 10) {
+                res.status(400).json({
+                    error: "Không thể gửi tin nhắn: Ngoài cửa sổ 24 giờ hoặc không được phép.",
+                    detail: errorMessage,
+                });
+            } else if (errorCode === 200) {
+                res.status(403).json({
+                    error: "Quyền truy cập không đủ hoặc token không hợp lệ.",
+                    detail: errorMessage,
+                });
+            } else {
+                res.status(500).json({ error: errorMessage, detail: err?.response?.data?.error?.message || err.message });
+            }
         }
     });
 
-    // Theo dõi hội thoại
-    router.post("/:messageId/follow", async (req: Request<MessageParams, {}, FollowRequestBody>, res: Response): Promise<void> => {
-        const { messageId } = req.params;
-        const { pageId, followed } = req.body;
+    router.post("/:messageId/follow", authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+        const { messageId } = req.params as MessageParams;
+        const { pageId, followed } = req.body as FollowRequestBody;
+        const userId = req.user?.id;
+
         try {
             if (!pageId || followed === undefined) {
                 res.status(400).json({ error: "Thiếu thông tin cần thiết" });
                 return;
             }
 
+            const page = await Page.findOne({ pageId, userId });
+            if (!page) {
+                res.status(404).json({ error: "Không tìm thấy page hoặc bạn không có quyền truy cập" });
+                return;
+            }
+
             const message = await Message.findOneAndUpdate(
-                { _id: messageId, pageId },
+                { _id: messageId, pageId, userId },
                 { followed },
                 { new: true }
             );
