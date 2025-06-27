@@ -55,6 +55,7 @@ router.post("/register", async (req: Request<{}, {}, RegisterRequestBody>, res: 
     }
 });
 
+
 router.post("/login", async (req: Request<{}, {}, LoginRequestBody>, res: Response): Promise<void> => {
     try {
         const { email, password } = req.body;
@@ -119,6 +120,16 @@ router.get("/facebook", authMiddleware, (req: AuthenticatedRequest, res: Respons
     res.redirect(authUrl);
 });
 
+router.get("/me", authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const users = await User.find();
+    res.json(users.map(user => ({
+        id: user._id,
+        email: user.email,
+        name: user.name,
+    })));
+});
+
+
 router.get("/facebook/callback", authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const code = req.query.code as string;
     const userId = req.user?.id;
@@ -161,5 +172,7 @@ router.get("/facebook/callback", authMiddleware, async (req: AuthenticatedReques
         res.status(500).json({ error: "Kết nối Facebook thất bại", detail: err?.response?.data?.error?.message || err.message });
     }
 });
+
+
 
 export default router;
