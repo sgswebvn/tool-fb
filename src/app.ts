@@ -7,7 +7,7 @@ import pageRoutes from "./routes/pages";
 import postRoutes from "./routes/posts";
 import commentRoutes from "./routes/comments";
 import webhookRoutes from "./routes/webhook";
-// import { authMiddleware } from "./middleware/auth";
+
 
 const app = express();
 app.use(helmet());
