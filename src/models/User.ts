@@ -7,6 +7,7 @@ export interface IUser extends Document {
     resetToken?: string;
     resetTokenExpire?: Date;
     facebookId?: string;
+    facebookAccessToken?: string;
 }
 
 const userSchema = new Schema<IUser>({
@@ -16,6 +17,7 @@ const userSchema = new Schema<IUser>({
     resetToken: String,
     resetTokenExpire: Date,
     facebookId: String,
+    facebookAccessToken: String,
 });
 
 export default model<IUser>("User", userSchema);

@@ -165,34 +165,45 @@ router.get("/facebook/callback", authMiddleware, async (req: AuthenticatedReques
         const { data: fbUser } = await axios.get(`https://graph.facebook.com/me?fields=id&access_token=${tokenData.access_token}`);
         const facebookId = fbUser.id;
 
-        // Cập nhật facebookId vào User
+        // Cập nhật facebookId và access_token tạm thời vào User
         await User.updateOne(
             { _id: userId },
-            { facebookId },
+            { facebookId, facebookAccessToken: tokenData.access_token },
             { upsert: true }
         );
 
-        const { data: pages } = await axios.get(`https://graph.facebook.com/me/accounts?access_token=${tokenData.access_token}`);
-
-        for (const page of pages.data) {
-            await Page.updateOne(
-                { pageId: page.id, facebookId },
-                {
-                    facebookId,
-                    pageId: page.id,
-                    name: page.name,
-                    access_token: page.access_token,
-                    expires_in: tokenData.expires_in || 5184000,
-                    connected_at: new Date(),
-                },
-                { upsert: true }
-            );
-        }
-
-        res.redirect("http://localhost:3000/messages");
+        // Chuyển hướng về trang sản phẩm để chọn Fanpage
+        res.redirect("http://localhost:3000/products");
     } catch (err: any) {
         console.error("❌ Facebook login error:", err?.response?.data || err.message);
         res.status(500).json({ error: "Kết nối Facebook thất bại", detail: err?.response?.data?.error?.message || err.message });
+    }
+});
+
+router.get("/facebook/pages", authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+        const userId = req.user?.id;
+        if (!userId) {
+            res.status(401).json({ error: "Không tìm thấy thông tin người dùng" });
+            return;
+        }
+        const user = await User.findById(userId);
+        if (!user || !user.facebookId || !user.facebookAccessToken) {
+            res.status(404).json({ error: "Người dùng chưa kết nối Facebook" });
+            return;
+        }
+
+        const { data: pages } = await axios.get(`https://graph.facebook.com/me/accounts?access_token=${user.facebookAccessToken}`);
+        res.json(
+            pages.data.map((page: any) => ({
+                pageId: page.id,
+                name: page.name,
+                access_token: page.access_token,
+            }))
+        );
+    } catch (err: any) {
+        console.error("❌ Error fetching Facebook pages:", err?.response?.data || err.message);
+        res.status(500).json({ error: "Không thể lấy danh sách Fanpage", detail: err?.response?.data?.error?.message || err.message });
     }
 });
 

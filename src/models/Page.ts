@@ -7,6 +7,7 @@ export interface IPage extends Document {
     access_token: string;
     expires_in: number;
     connected_at: Date;
+    connected: boolean;
 }
 
 const pageSchema = new Schema<IPage>({
@@ -16,6 +17,7 @@ const pageSchema = new Schema<IPage>({
     access_token: String,
     expires_in: Number,
     connected_at: Date,
+    connected: { type: Boolean, default: true },
 });
 
 export default model<IPage>("Page", pageSchema);

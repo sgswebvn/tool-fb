@@ -85,7 +85,7 @@ export default (io: Server) => {
                 res.status(404).json({ error: "Người dùng chưa kết nối Facebook" });
                 return;
             }
-            const page = await Page.findOne({ pageId, facebookId: user.facebookId });
+            const page = await Page.findOne({ pageId, facebookId: user.facebookId, connected: true });
             if (!page) {
                 res.status(404).json({ error: "Không tìm thấy page hoặc bạn không có quyền truy cập" });
                 return;
@@ -153,7 +153,7 @@ export default (io: Server) => {
                 res.status(404).json({ error: "Người dùng chưa kết nối Facebook" });
                 return;
             }
-            const page = await Page.findOne({ pageId, facebookId: user.facebookId });
+            const page = await Page.findOne({ pageId, facebookId: user.facebookId, connected: true });
             if (!page) {
                 res.status(404).json({ error: "Không tìm thấy page hoặc bạn không có quyền truy cập" });
                 return;
@@ -255,7 +255,7 @@ export default (io: Server) => {
                 res.status(404).json({ error: "Người dùng chưa kết nối Facebook" });
                 return;
             }
-            const page = await Page.findOne({ pageId, facebookId: user.facebookId });
+            const page = await Page.findOne({ pageId, facebookId: user.facebookId, connected: true });
             if (!page) {
                 res.status(404).json({ error: "Không tìm thấy page hoặc bạn không có quyền truy cập" });
                 return;
@@ -271,7 +271,7 @@ export default (io: Server) => {
                 return;
             }
             res.json(message);
-        } catch (err) {
+        } catch (error) {
             res.status(500).json({ error: "Không thể cập nhật trạng thái theo dõi" });
         }
     });
