@@ -7,6 +7,7 @@ export interface IPage extends Document {
     access_token: string;
     expires_in?: number;
     connected_at: Date;
+    commentHideType: "hide_all" | "hide_phone" | "show_all";
 }
 
 const pageSchema = new Schema<IPage>({
@@ -16,6 +17,7 @@ const pageSchema = new Schema<IPage>({
     access_token: { type: String, required: true },
     expires_in: { type: Number },
     connected_at: { type: Date, default: Date.now },
+    commentHideType: { type: String, enum: ["hide_all", "hide_phone", "show_all"], default: "show_all" },
 });
 
 export default model<IPage>("Page", pageSchema);
