@@ -88,7 +88,7 @@ router.post("/forgot", async (req: Request<{}, {}, ForgotRequestBody>, res: Resp
         user.resetTokenExpire = new Date(Date.now() + 3600 * 1000); // 1 giờ
         await user.save();
         await sendResetMail(email, token);
-        resশ: res.json({ success: true });
+        res.json({ success: true });
     } catch (error) {
         res.status(500).json({ error: "Không thể gửi email đặt lại mật khẩu" });
     }
@@ -135,6 +135,7 @@ router.get("/me", authMiddleware, async (req: AuthenticatedRequest, res: Respons
             id: user._id,
             email: user.email,
             name: user.name,
+            facebookId: user.facebookId,
         });
     } catch (error) {
         res.status(500).json({ error: "Không thể lấy thông tin người dùng" });
@@ -160,13 +161,24 @@ router.get("/facebook/callback", authMiddleware, async (req: AuthenticatedReques
             },
         });
 
+        // Lấy facebookId
+        const { data: fbUser } = await axios.get(`https://graph.facebook.com/me?fields=id&access_token=${tokenData.access_token}`);
+        const facebookId = fbUser.id;
+
+        // Cập nhật facebookId vào User
+        await User.updateOne(
+            { _id: userId },
+            { facebookId },
+            { upsert: true }
+        );
+
         const { data: pages } = await axios.get(`https://graph.facebook.com/me/accounts?access_token=${tokenData.access_token}`);
 
         for (const page of pages.data) {
             await Page.updateOne(
-                { pageId: page.id, userId },
+                { pageId: page.id, facebookId },
                 {
-                    userId,
+                    facebookId,
                     pageId: page.id,
                     name: page.name,
                     access_token: page.access_token,

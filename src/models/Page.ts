@@ -1,23 +1,21 @@
-import { Schema, model, Document, Types } from "mongoose";
+import { Schema, model, Document } from "mongoose";
 
 export interface IPage extends Document {
-    userId: Types.ObjectId;
+    facebookId: string;
     pageId: string;
     name: string;
     access_token: string;
-    expires_in?: number;
+    expires_in: number;
     connected_at: Date;
-    commentHideType: "hide_all" | "hide_phone" | "show_all";
 }
 
 const pageSchema = new Schema<IPage>({
-    userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    facebookId: { type: String, required: true },
     pageId: { type: String, required: true },
-    name: { type: String, required: true },
-    access_token: { type: String, required: true },
-    expires_in: { type: Number },
-    connected_at: { type: Date, default: Date.now },
-    commentHideType: { type: String, enum: ["hide_all", "hide_phone", "show_all"], default: "show_all" },
+    name: String,
+    access_token: String,
+    expires_in: Number,
+    connected_at: Date,
 });
 
 export default model<IPage>("Page", pageSchema);

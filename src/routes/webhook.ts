@@ -41,7 +41,8 @@ router.post("/", async (req: Request, res: Response) => {
                                 recipientId,
                                 message,
                                 direction: "in",
-                                timestamp: newMsg.timestamp
+                                timestamp: newMsg.timestamp,
+                                id: newMsg._id
                             });
                         }
                     }

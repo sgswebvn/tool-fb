@@ -3,6 +3,7 @@ import axios from "axios";
 import { Server, Socket } from "socket.io";
 import Page from "../models/Page";
 import Message from "../models/Message";
+import User from "../models/User";
 import { authMiddleware } from "../middleware/auth";
 
 interface AuthenticatedRequest extends Request {
@@ -53,7 +54,17 @@ export default (io: Server) => {
 
     router.get("/", authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
         try {
-            const messages = await Message.find({ userId: req.user?.id }).sort({ timestamp: -1 });
+            const userId = req.user?.id;
+            if (!userId) {
+                res.status(401).json({ error: "Không tìm thấy thông tin người dùng" });
+                return;
+            }
+            const user = await User.findById(userId);
+            if (!user || !user.facebookId) {
+                res.status(404).json({ error: "Người dùng chưa kết nối Facebook" });
+                return;
+            }
+            const messages = await Message.find({ facebookId: user.facebookId }).sort({ timestamp: -1 });
             res.json(messages);
         } catch (error) {
             res.status(500).json({ error: "Lỗi máy chủ" });
@@ -65,7 +76,16 @@ export default (io: Server) => {
         const userId = req.user?.id;
 
         try {
-            const page = await Page.findOne({ pageId, userId });
+            if (!userId) {
+                res.status(401).json({ error: "Không tìm thấy thông tin người dùng" });
+                return;
+            }
+            const user = await User.findById(userId);
+            if (!user || !user.facebookId) {
+                res.status(404).json({ error: "Người dùng chưa kết nối Facebook" });
+                return;
+            }
+            const page = await Page.findOne({ pageId, facebookId: user.facebookId });
             if (!page) {
                 res.status(404).json({ error: "Không tìm thấy page hoặc bạn không có quyền truy cập" });
                 return;
@@ -124,8 +144,16 @@ export default (io: Server) => {
                 res.status(400).json({ error: "Thiếu thông tin cần thiết" });
                 return;
             }
-
-            const page = await Page.findOne({ pageId, userId });
+            if (!userId) {
+                res.status(401).json({ error: "Không tìm thấy thông tin người dùng" });
+                return;
+            }
+            const user = await User.findById(userId);
+            if (!user || !user.facebookId) {
+                res.status(404).json({ error: "Người dùng chưa kết nối Facebook" });
+                return;
+            }
+            const page = await Page.findOne({ pageId, facebookId: user.facebookId });
             if (!page) {
                 res.status(404).json({ error: "Không tìm thấy page hoặc bạn không có quyền truy cập" });
                 return;
@@ -162,7 +190,7 @@ export default (io: Server) => {
             );
 
             const newMsg = await Message.create({
-                userId,
+                facebookId: user.facebookId,
                 pageId,
                 senderId: "page",
                 senderName: page.name || "Page",
@@ -180,6 +208,7 @@ export default (io: Server) => {
                 message,
                 direction: "out",
                 timestamp: newMsg.timestamp,
+                id: newMsg._id,
             });
 
             res.json({ success: true });
@@ -204,29 +233,36 @@ export default (io: Server) => {
     });
 
     router.post("/:messageId/follow", authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-        const messageId = req.params.messageId; // Truy cập trực tiếp
+        const messageId = req.params.messageId;
         const { pageId, followed } = req.body as FollowRequestBody;
         const userId = req.user?.id;
 
-        if (!messageId) {
-            res.status(400).json({ error: "Thiếu messageId trong params" });
-            return;
-        }
-
         try {
+            if (!messageId) {
+                res.status(400).json({ error: "Thiếu messageId trong params" });
+                return;
+            }
             if (!pageId || followed === undefined) {
                 res.status(400).json({ error: "Thiếu thông tin cần thiết" });
                 return;
             }
-
-            const page = await Page.findOne({ pageId, userId });
+            if (!userId) {
+                res.status(401).json({ error: "Không tìm thấy thông tin người dùng" });
+                return;
+            }
+            const user = await User.findById(userId);
+            if (!user || !user.facebookId) {
+                res.status(404).json({ error: "Người dùng chưa kết nối Facebook" });
+                return;
+            }
+            const page = await Page.findOne({ pageId, facebookId: user.facebookId });
             if (!page) {
                 res.status(404).json({ error: "Không tìm thấy page hoặc bạn không có quyền truy cập" });
                 return;
             }
 
             const message = await Message.findOneAndUpdate(
-                { _id: messageId, pageId, userId },
+                { _id: messageId, pageId, facebookId: user.facebookId },
                 { followed },
                 { new: true }
             );
