@@ -10,6 +10,10 @@ export interface IUser extends Document {
     facebookAccessToken?: string;
     role: "admin" | "user" | "guest";
     package: string;
+    isActive: boolean;
+    createdAt?: Date;
+    updatedAt?: Date;
+    lastLogin?: Date;
 }
 
 const userSchema = new Schema<IUser>({
@@ -22,6 +26,10 @@ const userSchema = new Schema<IUser>({
     facebookAccessToken: String,
     role: { type: String, enum: ["admin", "user", "guest"], default: "user" },
     package: { type: String, default: "free" },
+    isActive: { type: Boolean, default: true },
+    createdAt: { type: Date, default: Date.now },
+    updatedAt: { type: Date, default: Date.now },
+    lastLogin: { type: Date, default: Date.now },
 });
 
 export default model<IUser>("User", userSchema);
