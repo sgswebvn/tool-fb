@@ -4,8 +4,6 @@ import { Server } from "socket.io";
 import mongoose from "mongoose";
 import app from "./app";
 import messageRoutes from "./routes/messages";
-import Package from "./models/Package";
-
 
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
