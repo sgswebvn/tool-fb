@@ -7,6 +7,7 @@ import pageRoutes from "./routes/pages";
 import postRoutes from "./routes/posts";
 import commentRoutes from "./routes/comments";
 import webhookRoutes from "./routes/webhook";
+import packagesRoutes from "./routes/packages";
 
 
 const app = express();
@@ -20,5 +21,6 @@ app.use("/pages", pageRoutes);
 app.use("/posts", postRoutes);
 app.use("/comments", commentRoutes);
 app.use("/webhook", webhookRoutes);
+app.use("/packages", packagesRoutes);
 
 export default app;
