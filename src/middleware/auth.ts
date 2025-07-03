@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
+import User from "../models/User"; // Import User model để lấy thông tin role
 
 interface JwtPayload {
     id: string;
@@ -9,7 +10,7 @@ interface JwtPayload {
 }
 
 interface AuthenticatedRequest extends Request {
-    user?: JwtPayload;
+    user?: JwtPayload & { role: string }; // Thêm role vào interface
 }
 
 export function authMiddleware(
@@ -39,8 +40,23 @@ export function authMiddleware(
             return;
         }
 
-        req.user = decoded;
-        next();
+        // Lấy thông tin người dùng từ database để lấy role
+        User.findById(decoded.id)
+            .then((user) => {
+                if (!user) {
+                    res.status(401).json({ error: "Người dùng không tồn tại" });
+                    return;
+                }
+                req.user = {
+                    id: decoded.id,
+                    username: decoded.username,
+                    role: user.role, // Gán role từ database
+                };
+                next();
+            })
+            .catch((err) => {
+                res.status(500).json({ error: "Lỗi truy vấn người dùng", detail: err.message });
+            });
     } catch (err: any) {
         if (err.name === "TokenExpiredError") {
             res.status(401).json({ error: "Token đã hết hạn" });
@@ -51,3 +67,15 @@ export function authMiddleware(
         }
     }
 }
+
+export const adminMiddleware = (
+    req: AuthenticatedRequest,
+    res: Response,
+    next: NextFunction
+): void => {
+    if (!req.user?.role || req.user.role !== "admin") {
+        res.status(403).json({ error: "Truy cập bị từ chối, yêu cầu quyền admin" });
+        return;
+    }
+    next();
+};

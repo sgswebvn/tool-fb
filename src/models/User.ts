@@ -8,6 +8,8 @@ export interface IUser extends Document {
     resetTokenExpire?: Date;
     facebookId?: string;
     facebookAccessToken?: string;
+    role: "admin" | "user" | "guest";
+    package: string;
 }
 
 const userSchema = new Schema<IUser>({
@@ -18,6 +20,8 @@ const userSchema = new Schema<IUser>({
     resetTokenExpire: Date,
     facebookId: String,
     facebookAccessToken: String,
+    role: { type: String, enum: ["admin", "user", "guest"], default: "user" },
+    package: { type: String, default: "free" },
 });
 
 export default model<IUser>("User", userSchema);

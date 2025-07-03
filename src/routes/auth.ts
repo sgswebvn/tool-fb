@@ -6,7 +6,7 @@ import crypto from "crypto";
 import User from "../models/User";
 import Page from "../models/Page";
 import { sendResetMail } from "../services/mailer";
-import { authMiddleware } from "../middleware/auth";
+import { authMiddleware, adminMiddleware } from "../middleware/auth";
 
 const router = express.Router();
 
@@ -14,6 +14,7 @@ interface RegisterRequestBody {
     email: string;
     password: string;
     name: string;
+    role?: "admin" | "user" | "guest";
 }
 
 interface LoginRequestBody {
@@ -30,8 +31,13 @@ interface ResetRequestBody {
     password: string;
 }
 
+interface UpdateRoleRequestBody {
+    userId: string;
+    role: "admin" | "user" | "guest";
+}
+
 interface AuthenticatedRequest extends Request {
-    user?: { id: string; username: string };
+    user?: { id: string; username: string; role: string };
 }
 
 router.post("/register", async (req: Request<{}, {}, RegisterRequestBody>, res: Response): Promise<void> => {
@@ -47,14 +53,21 @@ router.post("/register", async (req: Request<{}, {}, RegisterRequestBody>, res: 
             return;
         }
         const hash = await bcrypt.hash(password, 10);
-        const user = await User.create({ email, password: hash, name });
-        const token = jwt.sign({ id: user._id, username: name }, process.env.JWT_SECRET!, { expiresIn: "7d" });
-        res.json({ success: true, token, user: { id: user._id, email: user.email, name: user.name } });
+        const user = await User.create({ email, password: hash, name, role: "user", package: "free" });
+        const token = jwt.sign({ id: user._id, username: name }, process.env.JWT_SECRET!, {
+            expiresIn: "7d",
+        });
+        res.json({
+            success: true,
+            token,
+            user: { id: user._id, email: user.email, name: user.name, role: user.role },
+        });
     } catch (error) {
         res.status(500).json({ error: "Đăng ký thất bại" });
     }
 });
 
+// Đăng nhập
 router.post("/login", async (req: Request<{}, {}, LoginRequestBody>, res: Response): Promise<void> => {
     try {
         const { email, password } = req.body;
@@ -69,12 +82,16 @@ router.post("/login", async (req: Request<{}, {}, LoginRequestBody>, res: Respon
             return;
         }
         const token = jwt.sign({ id: user._id, username: user.name }, process.env.JWT_SECRET!, { expiresIn: "7d" });
-        res.json({ token, user: { id: user._id, email: user.email, name: user.name } });
+        res.json({
+            token,
+            user: { id: user._id, email: user.email, name: user.name, role: user.role },
+        });
     } catch (error) {
         res.status(500).json({ error: "Đăng nhập thất bại" });
     }
 });
 
+// Quên mật khẩu
 router.post("/forgot", async (req: Request<{}, {}, ForgotRequestBody>, res: Response): Promise<void> => {
     try {
         const { email } = req.body;
@@ -94,6 +111,7 @@ router.post("/forgot", async (req: Request<{}, {}, ForgotRequestBody>, res: Resp
     }
 });
 
+// Đặt lại mật khẩu
 router.post("/reset", async (req: Request<{}, {}, ResetRequestBody>, res: Response): Promise<void> => {
     try {
         const { token, password } = req.body;
@@ -112,13 +130,7 @@ router.post("/reset", async (req: Request<{}, {}, ResetRequestBody>, res: Respon
     }
 });
 
-router.get("/facebook", authMiddleware, (req: AuthenticatedRequest, res: Response) => {
-    const redirectUri = process.env.FB_REDIRECT_URI || "https://backend-fb-xevu.onrender.com/auth/facebook/callback";
-    const scope = "pages_messaging,pages_show_list";
-    const authUrl = `https://www.facebook.com/v18.0/dialog/oauth?client_id=${process.env.FB_APP_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}&state=${req.query.state}`;
-    res.redirect(authUrl);
-});
-
+// Lấy thông tin người dùng
 router.get("/me", authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
         const userId = req.user?.id;
@@ -135,6 +147,7 @@ router.get("/me", authMiddleware, async (req: AuthenticatedRequest, res: Respons
             id: user._id,
             email: user.email,
             name: user.name,
+            role: user.role,
             facebookId: user.facebookId,
         });
     } catch (error) {
@@ -142,6 +155,39 @@ router.get("/me", authMiddleware, async (req: AuthenticatedRequest, res: Respons
     }
 });
 
+router.put("/role", authMiddleware, adminMiddleware, async (req: Request<{}, {}, UpdateRoleRequestBody>, res: Response): Promise<void> => {
+    try {
+        const { userId, role } = req.body;
+        if (!userId || !role) {
+            res.status(400).json({ error: "Thiếu userId hoặc role" });
+            return;
+        }
+        if (!["admin", "user", "guest"].includes(role)) {
+            res.status(400).json({ error: "Vai trò không hợp lệ" });
+            return;
+        }
+        const user = await User.findById(userId);
+        if (!user) {
+            res.status(404).json({ error: "Người dùng không tồn tại" });
+            return;
+        }
+        user.role = role;
+        await user.save();
+        res.json({ success: true, user: { id: user._id, email: user.email, name: user.name, role: user.role } });
+    } catch (error) {
+        res.status(500).json({ error: "Cập nhật vai trò thất bại" });
+    }
+});
+
+// Facebook OAuth
+router.get("/facebook", authMiddleware, (req: AuthenticatedRequest, res: Response) => {
+    const redirectUri = process.env.FB_REDIRECT_URI || "https://backend-fb-xevu.onrender.com/auth/facebook/callback";
+    const scope = "pages_messaging,pages_show_list";
+    const authUrl = `https://www.facebook.com/v18.0/dialog/oauth?client_id=${process.env.FB_APP_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}&state=${req.query.state}`;
+    res.redirect(authUrl);
+});
+
+// Facebook callback
 router.get("/facebook/callback", authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const code = req.query.code as string;
     const userId = req.user?.id;
@@ -161,18 +207,15 @@ router.get("/facebook/callback", authMiddleware, async (req: AuthenticatedReques
             },
         });
 
-        // Lấy facebookId
         const { data: fbUser } = await axios.get(`https://graph.facebook.com/me?fields=id&access_token=${tokenData.access_token}`);
         const facebookId = fbUser.id;
 
-        // Cập nhật facebookId và access_token tạm thời vào User
         await User.updateOne(
             { _id: userId },
             { facebookId, facebookAccessToken: tokenData.access_token },
             { upsert: true }
         );
 
-        // Chuyển hướng về trang sản phẩm để chọn Fanpage
         res.redirect("http://localhost:3000/products");
     } catch (err: any) {
         console.error("❌ Facebook login error:", err?.response?.data || err.message);
@@ -180,6 +223,7 @@ router.get("/facebook/callback", authMiddleware, async (req: AuthenticatedReques
     }
 });
 
+// Lấy danh sách Fanpage
 router.get("/facebook/pages", authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
         const userId = req.user?.id;
