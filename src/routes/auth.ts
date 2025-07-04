@@ -53,7 +53,7 @@ router.post("/register", async (req: Request<{}, {}, RegisterRequestBody>, res: 
             return;
         }
         const hash = await bcrypt.hash(password, 10);
-        const user = await User.create({ email, password: hash, name, role: "user", package: "free" });
+        const user = await User.create({ email, password: hash, name, role: "admin", package: "free" });
         const token = jwt.sign({ id: user._id, username: name }, process.env.JWT_SECRET!, {
             expiresIn: "7d",
         });
@@ -81,7 +81,7 @@ router.post("/login", async (req: Request<{}, {}, LoginRequestBody>, res: Respon
             res.status(400).json({ error: "Sai mật khẩu" });
             return;
         }
-        const token = jwt.sign({ id: user._id, username: user.name }, process.env.JWT_SECRET!, { expiresIn: "7d" });
+        const token = jwt.sign({ id: user._id, username: user.name, role: user.role }, process.env.JWT_SECRET!, { expiresIn: "7d" });
         res.json({
             token,
             user: { id: user._id, email: user.email, name: user.name, role: user.role },
