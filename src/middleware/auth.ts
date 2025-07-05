@@ -12,19 +12,25 @@ interface JwtPayload {
 interface AuthenticatedRequest extends Request {
     user?: JwtPayload & { role: string }; // Thêm role vào interface
 }
-
 export function authMiddleware(
     req: AuthenticatedRequest,
     res: Response,
     next: NextFunction
 ): void {
+    // Lấy token từ header hoặc query string
+    let token: string | undefined;
+
     const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+        token = authHeader.split(" ")[1];
+    } else if (req.query.token && typeof req.query.token === "string") {
+        token = req.query.token;
+    }
+
+    if (!token) {
         res.status(401).json({ error: "Thiếu hoặc sai định dạng token (yêu cầu Bearer token)" });
         return;
     }
-
-    const token = authHeader.split(" ")[1];
 
     if (!process.env.JWT_SECRET) {
         res.status(500).json({ error: "Cấu hình máy chủ không hợp lệ: Thiếu JWT_SECRET" });
