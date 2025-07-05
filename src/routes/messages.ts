@@ -70,6 +70,22 @@ export default (io: Server) => {
             res.status(500).json({ error: "Lỗi máy chủ" });
         }
     });
+    async function getFacebookUserInfo(senderId: string, accessToken: string) {
+        try {
+            const { data } = await axios.get(
+                `https://graph.facebook.com/v18.0/${senderId}`,
+                {
+                    params: {
+                        fields: "id,name,gender,picture",
+                        access_token: accessToken,
+                    },
+                }
+            );
+            return data;
+        } catch {
+            return null;
+        }
+    }
 
     router.get("/fb/:pageId", authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
         const { pageId } = req.params;
@@ -113,8 +129,14 @@ export default (io: Server) => {
                             },
                         }
                     );
+                    const customerMsg = messages.data.find((msg: FacebookMessage) => msg.from.id !== pageId);
+                    let customerInfo = null;
+                    if (customerMsg) {
+                        customerInfo = await getFacebookUserInfo(customerMsg.from.id, page.access_token);
+                    }
                     return {
                         conversationId: conv.id,
+                        customerInfo,
                         messages: messages.data.map((msg: FacebookMessage, index: number) => ({
                             id: msg.id || `${conv.id}_${index}`,
                             senderId: msg.from.id,
