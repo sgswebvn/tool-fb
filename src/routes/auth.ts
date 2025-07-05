@@ -180,24 +180,33 @@ router.put("/role", authMiddleware, adminMiddleware, async (req: Request<{}, {},
 });
 
 // Facebook OAuth
-router.get("/facebook", authMiddleware, (req: AuthenticatedRequest, res: Response) => {
-    const redirectUri = process.env.FB_REDIRECT_URI || "https://backend-fb-xevu.onrender.com/auth/facebook/callback";
+router.get("/facebook", authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const redirectUri = process.env.FB_REDIRECT_URI || "https://tool-fb.onrender.com/auth/facebook/callback";
     const scope = "pages_messaging,pages_show_list";
-    const authUrl = `https://www.facebook.com/v18.0/dialog/oauth?client_id=${process.env.FB_APP_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}&state=${req.query.state}`;
+    const token = req.headers.authorization?.split(" ")[1] || req.query.token;
+    if (!token) {
+        res.status(401).json({ error: "Thiếu token xác thực" });
+        return
+    }
+    const authUrl = `https://www.facebook.com/v18.0/dialog/oauth?client_id=${process.env.FB_APP_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}&state=${token}`;
     res.redirect(authUrl);
 });
 
-// Facebook callback
-router.get("/facebook/callback", authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+router.get("/facebook/callback", async (req: Request, res: Response): Promise<void> => {
     const code = req.query.code as string;
-    const userId = req.user?.id;
+    const token = req.query.state as string; // Lấy token từ state
 
-    if (!userId) {
-        res.status(401).json({ error: "Người dùng chưa đăng nhập" });
+    if (!token) {
+        res.status(401).json({ error: "Thiếu token xác thực" });
         return;
     }
 
     try {
+        // Xác thực token, lấy userId
+        const decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
+        const userId = decoded.id;
+
+        // Lấy access_token Facebook
         const { data: tokenData } = await axios.get(`https://graph.facebook.com/v18.0/oauth/access_token`, {
             params: {
                 client_id: process.env.FB_APP_ID,
@@ -207,21 +216,24 @@ router.get("/facebook/callback", authMiddleware, async (req: AuthenticatedReques
             },
         });
 
+        // Lấy facebookId
         const { data: fbUser } = await axios.get(`https://graph.facebook.com/me?fields=id&access_token=${tokenData.access_token}`);
         const facebookId = fbUser.id;
 
+        // Lưu vào DB
         await User.updateOne(
             { _id: userId },
             { facebookId, facebookAccessToken: tokenData.access_token },
             { upsert: true }
         );
 
-        res.redirect("http://localhost:3000/products");
+        res.redirect("http://localhost:3000/dashboard");
     } catch (err: any) {
         console.error("❌ Facebook login error:", err?.response?.data || err.message);
         res.status(500).json({ error: "Kết nối Facebook thất bại", detail: err?.response?.data?.error?.message || err.message });
     }
 });
+
 
 // Lấy danh sách Fanpage
 router.get("/facebook/pages", authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
