@@ -53,7 +53,7 @@ router.post("/register", async (req: Request<{}, {}, RegisterRequestBody>, res: 
             return;
         }
         const hash = await bcrypt.hash(password, 10);
-        const user = await User.create({ email, password: hash, name, role: "admin", package: "free" });
+        const user = await User.create({ email, password: hash, name, role: "user", package: "free" });
         const token = jwt.sign({ id: user._id, username: name }, process.env.JWT_SECRET!, {
             expiresIn: "7d",
         });
