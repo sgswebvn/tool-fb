@@ -76,20 +76,26 @@ router.get("/:pageId/:postId/comments", async (req: Request<PostParams>, res: Re
             return;
         }
 
-        const { data } = await axios.get<{ data: FacebookComment[] }>(
-            `https://graph.facebook.com/v18.0/${postId}/comments`,
-            { params: { access_token: page.access_token, fields: "id,message,from,created_time" } }
-        );
-
-        for (const cmt of data.data) {
-            await Comment.updateOne(
-                { commentId: cmt.id },
-                { postId, commentId: cmt.id, message: cmt.message, from: cmt.from.name, created_time: cmt.created_time },
-                { upsert: true }
+        // Hàm đệ quy lấy tất cả comment và reply
+        async function fetchComments(fbPostId: string, parentId: string | null = null) {
+            const { data } = await axios.get<{ data: FacebookComment[] }>(
+                `https://graph.facebook.com/v18.0/${fbPostId}/comments`,
+                { params: { access_token: page.access_token, fields: "id,message,from,created_time", filter: "stream" } }
             );
+            for (const cmt of data.data) {
+                await Comment.updateOne(
+                    { commentId: cmt.id },
+                    { postId, commentId: cmt.id, message: cmt.message, from: cmt.from.name, created_time: cmt.created_time, parent_id: parentId || null },
+                    { upsert: true }
+                );
+                // Lấy reply cho comment này
+                await fetchComments(cmt.id, cmt.id);
+            }
         }
-
-        res.json(data.data);
+        await fetchComments(postId, null);
+        // Trả về tất cả comment của postId
+        const comments = await Comment.find({ postId }).sort({ created_time: 1 });
+        res.json(comments);
     } catch (error) {
         console.error("❌ Lỗi khi lấy bình luận từ Facebook:", error);
         res.status(500).json({ error: "Không thể lấy bình luận từ Facebook" });

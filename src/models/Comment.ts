@@ -7,6 +7,7 @@ export interface IComment extends Document {
     message: string;
     from: string;
     created_time: string;
+    parent_id?: string;
 }
 
 const commentSchema = new Schema<IComment>({
@@ -16,6 +17,7 @@ const commentSchema = new Schema<IComment>({
     message: String,
     from: String,
     created_time: String,
+    parent_id: { type: String, default: null },
 });
 
 export default model<IComment>("Comment", commentSchema);
