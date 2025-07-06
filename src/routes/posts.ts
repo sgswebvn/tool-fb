@@ -75,12 +75,12 @@ router.get("/:pageId/:postId/comments", async (req: Request<PostParams>, res: Re
             res.status(404).json({ error: "Không tìm thấy page" });
             return;
         }
-
+        const access_token = page.access_token;
         // Hàm đệ quy lấy tất cả comment và reply
         async function fetchComments(fbPostId: string, parentId: string | null = null) {
             const { data } = await axios.get<{ data: FacebookComment[] }>(
                 `https://graph.facebook.com/v18.0/${fbPostId}/comments`,
-                { params: { access_token: page.access_token, fields: "id,message,from,created_time", filter: "stream" } }
+                { params: { access_token, fields: "id,message,from,created_time", filter: "stream" } }
             );
             for (const cmt of data.data) {
                 await Comment.updateOne(
