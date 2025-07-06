@@ -82,18 +82,21 @@ router.get("/:pageId/:postId/comments", async (req: Request<PostParams>, res: Re
             { params: { access_token, fields: "id,message,from,created_time,parent" } }
         );
         for (const cmt of data.data) {
-            await Comment.updateOne(
-                { commentId: cmt.id },
-                {
-                    postId,
-                    commentId: cmt.id,
-                    message: cmt.message,
-                    from: cmt.from?.name || "Fanpage",
-                    created_time: cmt.created_time,
-                    parent_id: cmt.parent?.id || null
-                },
-                { upsert: true }
-            );
+            // Chỉ lưu comment nếu parent là null hoặc parent thuộc postId này
+            if (!cmt.parent || cmt.parent.id === postId) {
+                await Comment.updateOne(
+                    { commentId: cmt.id },
+                    {
+                        postId,
+                        commentId: cmt.id,
+                        message: cmt.message,
+                        from: cmt.from?.name || "Fanpage",
+                        created_time: cmt.created_time,
+                        parent_id: cmt.parent?.id || null
+                    },
+                    { upsert: true }
+                );
+            }
         }
         // Trả về tất cả comment của postId
         const comments = await Comment.find({ postId }).sort({ created_time: 1 });
