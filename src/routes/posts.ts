@@ -76,30 +76,25 @@ router.get("/:pageId/:postId/comments", async (req: Request<PostParams>, res: Re
             return;
         }
         const access_token = page.access_token;
-        // Hàm đệ quy lấy tất cả comment và reply, có giới hạn depth
-        async function fetchComments(fbPostId: string, parentId: string | null = null, depth = 0) {
-            if (depth > 5) return; // tránh lặp vô hạn
-            const { data } = await axios.get<{ data: FacebookComment[] }>(
-                `https://graph.facebook.com/v18.0/${fbPostId}/comments`,
-                { params: { access_token, fields: "id,message,from,created_time", filter: "stream" } }
+        // Lấy tất cả comment và reply trong 1 lần gọi
+        const { data } = await axios.get<{ data: any[] }>(
+            `https://graph.facebook.com/v18.0/${postId}/comments`,
+            { params: { access_token, fields: "id,message,from,created_time,parent" } }
+        );
+        for (const cmt of data.data) {
+            await Comment.updateOne(
+                { commentId: cmt.id },
+                {
+                    postId,
+                    commentId: cmt.id,
+                    message: cmt.message,
+                    from: cmt.from?.name || "Fanpage",
+                    created_time: cmt.created_time,
+                    parent_id: cmt.parent?.id || null
+                },
+                { upsert: true }
             );
-            for (const cmt of data.data) {
-                await Comment.updateOne(
-                    { commentId: cmt.id },
-                    { postId, commentId: cmt.id, message: cmt.message, from: cmt.from.name, created_time: cmt.created_time, parent_id: parentId || null },
-                    { upsert: true }
-                );
-                // Lấy reply cho comment này nếu có
-                const replyRes = await axios.get<{ data: FacebookComment[] }>(
-                    `https://graph.facebook.com/v18.0/${cmt.id}/comments`,
-                    { params: { access_token, fields: "id,message,from,created_time", filter: "stream" } }
-                );
-                if (replyRes.data.data.length > 0) {
-                    await fetchComments(cmt.id, cmt.id, depth + 1);
-                }
-            }
         }
-        await fetchComments(postId, null, 0);
         // Trả về tất cả comment của postId
         const comments = await Comment.find({ postId }).sort({ created_time: 1 });
         res.json(comments);
