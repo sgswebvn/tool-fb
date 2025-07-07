@@ -159,18 +159,49 @@ export default (io: Server) => {
                     if (customerMsg) {
                         customerInfo = await getFacebookUserInfo(customerMsg.from.id, page.access_token);
                     }
+                    const messageData = await Promise.all(
+                        messages.data.map(async (msg: FacebookMessage, index: number) => {
+                            const userInfo = await getFacebookUserInfo(msg.from.id, page.access_token);
+                            const avatar = userInfo?.picture?.data?.url || null;
+                            const messageId = msg.id || `${conv.id}_${index}`;
+                            await Message.updateOne(
+                                { id: messageId, pageId },
+                                {
+                                    id: messageId,
+                                    senderId: msg.from.id,
+                                    senderName: msg.from.name,
+                                    recipientId: msg.to.id,
+                                    message: msg.message,
+                                    timestamp: msg.created_time,
+                                    direction: msg.from.id === pageId ? "out" : "in",
+                                    facebookId: user.facebookId,
+                                    pageId,
+                                    avatar,
+                                },
+                                { upsert: true }
+                            );
+                            return {
+                                id: messageId,
+                                senderId: msg.from.id,
+                                senderName: msg.from.name,
+                                recipientId: msg.to.id,
+                                message: msg.message,
+                                timestamp: msg.created_time,
+                                direction: msg.from.id === pageId ? "out" : "in",
+                                avatar,
+                            };
+                        })
+                    );
                     return {
                         conversationId: conv.id,
-                        customerInfo,
-                        messages: messages.data.map((msg: FacebookMessage, index: number) => ({
-                            id: msg.id || `${conv.id}_${index}`,
-                            senderId: msg.from.id,
-                            senderName: msg.from.name,
-                            recipientId: msg.to.id,
-                            message: msg.message,
-                            timestamp: msg.created_time,
-                            direction: msg.from.id === pageId ? "out" : "in",
-                        })),
+                        customerInfo: customerInfo
+                            ? {
+                                  id: customerInfo.id,
+                                  name: customerInfo.name,
+                                  avatar: customerInfo.picture?.data?.url || null,
+                              }
+                            : null,
+                        messages: messageData,
                     };
                 })
             );
@@ -240,26 +271,31 @@ export default (io: Server) => {
             } else {
                 payload.messaging_type = "RESPONSE";
             }
-            await axios.post(`https://graph.facebook.com/v18.0/me/messages?access_token=${page.access_token}`, payload);
+            const response = await axios.post(`https://graph.facebook.com/v18.0/me/messages?access_token=${page.access_token}`, payload);
+            const newMessageId = response.data.message_id || `${pageId}_${Date.now()}`;
+            const pageInfo = await getFacebookUserInfo(pageId, page.access_token);
             const newMsg = await Message.create({
+                id: newMessageId,
                 facebookId: user.facebookId,
                 pageId,
-                senderId: "page",
+                senderId: pageId,
                 senderName: page.name || "Page",
                 recipientId,
                 message,
                 direction: "out",
-                timestamp: new Date(),
+                timestamp: new Date().toISOString(),
+                avatar: pageInfo?.picture?.data?.url || null,
             });
             io.to(pageId).emit("fb_message", {
+                id: newMessageId,
                 pageId,
-                senderId: "page",
+                senderId: pageId,
                 senderName: page.name || "Page",
                 recipientId,
                 message,
                 direction: "out",
                 timestamp: newMsg.timestamp,
-                id: newMsg._id,
+                avatar: pageInfo?.picture?.data?.url || null,
             });
             res.json({ success: true });
         } catch (err: any) {

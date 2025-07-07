@@ -8,6 +8,7 @@ export interface IMessage extends Document {
     message: string;
     direction: "in" | "out";
     timestamp: Date;
+    avatar?: string | null;
 }
 
 const messageSchema = new Schema<IMessage>({
@@ -18,6 +19,7 @@ const messageSchema = new Schema<IMessage>({
     message: String,
     direction: { type: String, enum: ["in", "out"] },
     timestamp: { type: Date, default: Date.now },
+    avatar: { type: String, default: null }
 });
 
 export default model<IMessage>("Message", messageSchema);
