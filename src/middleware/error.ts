@@ -8,4 +8,3 @@ export function errorHandler(err: any, req: Request, res: Response, next: NextFu
         detail: err.detail || null,
     });
 }
-app.use(errorHandler);
