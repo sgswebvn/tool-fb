@@ -5,6 +5,7 @@ const PostSchema = new Schema({
     postId: { type: String, required: true, unique: true },
     message: { type: String },
     created_time: { type: Date, index: true },
+    picture: { type: String, default: null},
 });
 
 export default mongoose.model("Post", PostSchema);
