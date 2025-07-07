@@ -161,6 +161,7 @@ export default (io: Server) => {
                     }
                     const messageData = await Promise.all(
                         messages.data.map(async (msg: FacebookMessage, index: number) => {
+                            if (!msg.message) return null; // Bỏ qua tin nhắn không có nội dung
                             const userInfo = await getFacebookUserInfo(msg.from.id, page.access_token);
                             const avatar = userInfo?.picture?.data?.url || null;
                             const messageId = msg.id || `${conv.id}_${index}`;
@@ -201,7 +202,7 @@ export default (io: Server) => {
                                   avatar: customerInfo.picture?.data?.url || null,
                               }
                             : null,
-                        messages: messageData,
+                        messages: messageData.filter((msg) => msg !== null).sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()),
                     };
                 })
             );
@@ -352,7 +353,7 @@ export default (io: Server) => {
                 return;
             }
             const message = await Message.findOneAndUpdate(
-                { _id: messageId, pageId, facebookId: user.facebookId },
+                { id: messageId, pageId, facebookId: user.facebookId }, // Sử dụng id thay vì _id
                 { followed },
                 { new: true }
             );
