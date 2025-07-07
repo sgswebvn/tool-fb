@@ -9,6 +9,7 @@ import commentRoutes from "./routes/comments";
 import webhookRoutes from "./routes/webhook";
 import packagesRoutes from "./routes/packages";
 import usersRoutes from "./routes/users";
+import { errorHandler } from "./middleware/error";
 
 
 const app = express();
@@ -16,6 +17,7 @@ app.use(helmet());
 app.use(cors({ origin: ["http://localhost:3000"], credentials: true }));
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
+app.use(errorHandler);
 
 app.use("/auth", authRoutes);
 app.use("/pages", pageRoutes);

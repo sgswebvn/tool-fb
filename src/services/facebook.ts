@@ -1,4 +1,5 @@
 import axios from "axios";
+import Page from "../models/Page";
 
 interface FacebookUser {
     id: string;
@@ -27,4 +28,21 @@ export async function getFacebookPages(accessToken: string): Promise<FacebookPag
     } catch (error) {
         throw new Error("Không thể lấy danh sách trang Facebook");
     }
+}
+export async function refreshAccessToken(pageId: string) {
+    const page = await Page.findOne({ pageId });
+    if (!page) throw new Error("Không tìm thấy page");
+    const { data } = await axios.get(`https://graph.facebook.com/v18.0/oauth/access_token`, {
+        params: {
+            grant_type: "fb_exchange_token",
+            client_id: process.env.FB_APP_ID,
+            client_secret: process.env.FB_APP_SECRET,
+            fb_exchange_token: page.access_token,
+        },
+    });
+    page.access_token = data.access_token;
+    page.expires_in = data.expires_in;
+    page.connected_at = new Date();
+    await page.save();
+    return page;
 }

@@ -94,27 +94,27 @@ router.post("/connect", authMiddleware, async (req: AuthenticatedRequest, res: R
 });
 
 // Lấy thông tin chi tiết 1 page
+// posts.ts
 router.get("/:pageId", authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
-        const userId = req.user?.id;
         const { pageId } = req.params;
+        const userId = req.user?.id;
+        if (!pageId || !userId) {
+            res.status(400).json({ error: "Thiếu pageId hoặc thông tin người dùng" });
+            return;
+        }
         const user = await User.findById(userId);
         if (!user || !user.facebookId) {
             res.status(404).json({ error: "Người dùng chưa kết nối Facebook" });
             return;
         }
-        const page = await Page.findOne({ facebookId: user.facebookId, pageId });
+        const page = await Page.findOne({ pageId, facebookId: user.facebookId });
         if (!page) {
-            res.status(404).json({ error: "Không tìm thấy page" });
+            res.status(404).json({ error: "Không tìm thấy page hoặc bạn không có quyền" });
             return;
         }
-        res.json({
-            pageId: page.pageId,
-            name: page.name,
-            connected: page.connected,
-        });
     } catch (error) {
-        res.status(500).json({ error: "Không thể lấy thông tin page" });
+        res.status(500).json({ error: "Không thể lấy bài đăng từ Facebook" });
     }
 });
 

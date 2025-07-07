@@ -5,6 +5,7 @@ import Page from "../models/Page";
 import Message from "../models/Message";
 import User from "../models/User";
 import { authMiddleware } from "../middleware/auth";
+import jwt from "jsonwebtoken";
 
 interface AuthenticatedRequest extends Request {
     user?: { id: string; username: string };
@@ -44,12 +45,37 @@ interface JoinData {
 
 export default (io: Server) => {
     const router = express.Router();
+    io.use((socket, next) => {
+        const token = socket.handshake.auth.token;
+        if (!token) return next(new Error("Authentication error"));
+        try {
+            const decoded = jwt.verify(token, process.env.JWT_SECRET || "default-secret-key") as any;
+            socket.data.user = decoded;
+            next();
+        } catch (err) {
+            next(new Error("Invalid token"));
+        }
+    });
 
     io.on("connection", (socket: Socket) => {
-        socket.on("join", (data: JoinData) => {
-            socket.join(data.pageId);
+        socket.on("join", async (data: JoinData) => {
+            try {
+                const userId = socket.data.user?.id;
+                const user = await User.findById(userId);
+                if (!user || !user.facebookId) {
+                    socket.emit("error", { error: "Người dùng chưa kết nối Facebook" });
+                    return;
+                }
+                const page = await Page.findOne({ pageId: data.pageId, facebookId: user.facebookId });
+                if (!page) {
+                    socket.emit("error", { error: "Không có quyền truy cập page" });
+                    return;
+                }
+                socket.join(data.pageId);
+            } catch (err) {
+                socket.emit("error", { error: "Lỗi khi tham gia room" });
+            }
         });
-        socket.on("disconnect", () => { });
     });
 
     router.get("/", authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
@@ -66,10 +92,11 @@ export default (io: Server) => {
             }
             const messages = await Message.find({ facebookId: user.facebookId }).sort({ timestamp: -1 });
             res.json(messages);
-        } catch (error) {
-            res.status(500).json({ error: "Lỗi máy chủ" });
+        } catch (error: any) {
+            res.status(500).json({ error: "Lỗi máy chủ", detail: error.message });
         }
     });
+
     async function getFacebookUserInfo(senderId: string, accessToken: string) {
         try {
             const { data } = await axios.get(
@@ -106,17 +133,15 @@ export default (io: Server) => {
                 res.status(404).json({ error: "Không tìm thấy page hoặc bạn không có quyền truy cập" });
                 return;
             }
-
             if (page.expires_in && new Date().getTime() > new Date(page.connected_at).getTime() + page.expires_in * 1000) {
+                await Page.updateOne({ pageId }, { connected: false });
                 res.status(400).json({ error: "Token của trang đã hết hạn. Vui lòng kết nối lại qua Facebook." });
                 return;
             }
-
             const { data: conversations } = await axios.get<{ data: FacebookConversation[] }>(
                 `https://graph.facebook.com/v18.0/${pageId}/conversations`,
                 { params: { access_token: page.access_token, limit: 10 } }
             );
-
             const messagesByConversation = await Promise.all(
                 conversations.data.map(async (conv: FacebookConversation) => {
                     const { data: messages } = await axios.get<{ data: FacebookMessage[] }>(
@@ -149,11 +174,25 @@ export default (io: Server) => {
                     };
                 })
             );
-
             res.json(messagesByConversation);
         } catch (err: any) {
             console.error("❌ Lỗi khi lấy tin nhắn từ Facebook:", err?.response?.data || err.message);
-            res.status(500).json({ error: "Không thể lấy tin nhắn từ Facebook", detail: err?.response?.data?.error?.message || err.message });
+            const errorMessage = err.response?.data?.error?.message || "Không thể lấy tin nhắn từ Facebook";
+            const errorCode = err.response?.data?.error?.code;
+            if (errorCode === 190) {
+                await Page.updateOne({ pageId }, { connected: false });
+                res.status(400).json({
+                    error: "Token của trang đã hết hạn. Vui lòng kết nối lại qua Facebook.",
+                    detail: errorMessage,
+                });
+            } else if (errorCode === 4) {
+                res.status(429).json({
+                    error: "Đã vượt quá giới hạn API. Vui lòng thử lại sau.",
+                    detail: errorMessage,
+                });
+            } else {
+                res.status(500).json({ error: errorMessage, detail: err?.response?.data?.error?.message || err.message });
+            }
         }
     });
 
@@ -180,37 +219,28 @@ export default (io: Server) => {
                 res.status(404).json({ error: "Không tìm thấy page hoặc bạn không có quyền truy cập" });
                 return;
             }
-
             if (page.expires_in && new Date().getTime() > new Date(page.connected_at).getTime() + page.expires_in * 1000) {
+                await Page.updateOne({ pageId }, { connected: false });
                 res.status(400).json({ error: "Token của trang đã hết hạn. Vui lòng kết nối lại qua Facebook." });
                 return;
             }
-
             const lastMessage = await Message.findOne({
                 pageId,
                 senderId: recipientId,
                 direction: "in",
             }).sort({ timestamp: -1 });
-
             const isWithin24Hours = lastMessage && (new Date().getTime() - new Date(lastMessage.timestamp).getTime()) <= 24 * 60 * 60 * 1000;
-
             const payload: any = {
                 recipient: { id: recipientId },
                 message: { text: message },
             };
-
             if (!isWithin24Hours) {
                 payload.messaging_type = "MESSAGE_TAG";
                 payload.tag = "ACCOUNT_UPDATE";
             } else {
                 payload.messaging_type = "RESPONSE";
             }
-
-            await axios.post(
-                `https://graph.facebook.com/v18.0/me/messages?access_token=${page.access_token}`,
-                payload
-            );
-
+            await axios.post(`https://graph.facebook.com/v18.0/me/messages?access_token=${page.access_token}`, payload);
             const newMsg = await Message.create({
                 facebookId: user.facebookId,
                 pageId,
@@ -221,7 +251,6 @@ export default (io: Server) => {
                 direction: "out",
                 timestamp: new Date(),
             });
-
             io.to(pageId).emit("fb_message", {
                 pageId,
                 senderId: "page",
@@ -232,15 +261,19 @@ export default (io: Server) => {
                 timestamp: newMsg.timestamp,
                 id: newMsg._id,
             });
-
             res.json({ success: true });
         } catch (err: any) {
-            console.error("❌ Lỗi khi gửi tin nhắn:", err?.response?.data || err.message);
             const errorMessage = err.response?.data?.error?.message || "Không thể gửi tin nhắn";
             const errorCode = err.response?.data?.error?.code;
-            if (errorCode === 10) {
+            if (errorCode === 190) {
+                await Page.updateOne({ pageId }, { connected: false });
                 res.status(400).json({
-                    error: "Không thể gửi tin nhắn: Ngoài cửa sổ 24 giờ hoặc không được phép.",
+                    error: "Token của trang đã hết hạn. Vui lòng kết nối lại qua Facebook.",
+                    detail: errorMessage,
+                });
+            } else if (errorCode === 4) {
+                res.status(429).json({
+                    error: "Đã vượt quá giới hạn API. Vui lòng thử lại sau.",
                     detail: errorMessage,
                 });
             } else if (errorCode === 200) {
@@ -282,7 +315,6 @@ export default (io: Server) => {
                 res.status(404).json({ error: "Không tìm thấy page hoặc bạn không có quyền truy cập" });
                 return;
             }
-
             const message = await Message.findOneAndUpdate(
                 { _id: messageId, pageId, facebookId: user.facebookId },
                 { followed },
@@ -293,8 +325,8 @@ export default (io: Server) => {
                 return;
             }
             res.json(message);
-        } catch (error) {
-            res.status(500).json({ error: "Không thể cập nhật trạng thái theo dõi" });
+        } catch (error: any) {
+            res.status(500).json({ error: "Không thể cập nhật trạng thái theo dõi", detail: error.message });
         }
     });
 

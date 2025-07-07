@@ -6,7 +6,7 @@ export interface IComment extends Document {
     commentId: string;
     message: string;
     from: string;
-    created_time: string;
+    created_time: Date;
     parent_id?: string;
 }
 
@@ -16,7 +16,7 @@ const commentSchema = new Schema<IComment>({
     commentId: { type: String, required: true },
     message: String,
     from: String,
-    created_time: String,
+    created_time: { type: Date, required: true },
     parent_id: { type: String, default: null },
 });
 

@@ -11,7 +11,7 @@ export interface IMessage extends Document {
 }
 
 const messageSchema = new Schema<IMessage>({
-    pageId: String,
+    pageId: { type: String, required: true, index: true },
     senderId: String,
     senderName: String,
     recipientId: String,

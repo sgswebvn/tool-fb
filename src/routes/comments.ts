@@ -6,15 +6,19 @@ import axios from "axios";
 
 const router = express.Router();
 
-// Lấy danh sách comment theo postId (có parent_id)
 router.get("/:postId", async (req: Request<{ postId: string }>, res: Response): Promise<void> => {
     try {
         const { postId } = req.params;
+        const { limit = 10, skip = 0 } = req.query; // Thêm phân trang
         if (!postId) {
             res.status(400).json({ error: "Thiếu postId" });
             return;
         }
-        const comments = await Comment.find({ postId }).sort({ created_time: 1 });
+        const comments = await Comment.find({ postId })
+            .sort({ created_time: 1 })
+            .limit(Number(limit))
+            .skip(Number(skip))
+            .lean();
         res.json(comments);
     } catch (error) {
         res.status(500).json({ error: "Lỗi máy chủ" });
