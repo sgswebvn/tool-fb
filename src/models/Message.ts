@@ -1,6 +1,7 @@
 import { Schema, model, Document, Types } from "mongoose";
 
 export interface IMessage extends Document {
+    id: string;
     pageId: string;
     senderId: string;
     senderName: string;
@@ -12,6 +13,7 @@ export interface IMessage extends Document {
 }
 
 const messageSchema = new Schema<IMessage>({
+    id: { type: String, required: true, unique: true },
     pageId: { type: String, required: true, index: true },
     senderId: String,
     senderName: String,
