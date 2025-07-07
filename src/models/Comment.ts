@@ -8,6 +8,7 @@ const CommentSchema = new Schema({
     from: { type: String },
     created_time: { type: Date, index: true },
     parent_id: { type: String },
+    direction: { type: String, enum: ["in", "out"], default: "in" },
 });
 
 export default mongoose.model("Comment", CommentSchema);
