@@ -1,23 +1,13 @@
-import { Schema, model, Document } from "mongoose";
+import mongoose, { Schema } from "mongoose";
 
-export interface IPage extends Document {
-    facebookId: string;
-    pageId: string;
-    name: string;
-    access_token: string;
-    expires_in: number;
-    connected_at: Date;
-    connected: boolean;
-}
-
-const pageSchema = new Schema<IPage>({
+const PageSchema = new Schema({
     facebookId: { type: String, required: true },
-    pageId: { type: String, required: true },
-    name: String,
-    access_token: String,
-    expires_in: Number,
-    connected_at: Date,
+    pageId: { type: String, required: true, unique: true },
+    name: { type: String, required: true },
+    access_token: { type: String, required: true },
+    expires_in: { type: Number },
+    connected_at: { type: Date, default: Date.now },
     connected: { type: Boolean, default: true },
 });
 
-export default model<IPage>("Page", pageSchema);
+export default mongoose.model("Page", PageSchema);

@@ -1,17 +1,10 @@
-import { Schema, model, Document } from "mongoose";
+import mongoose, { Schema } from "mongoose";
 
-export interface IPost extends Document {
-    pageId: string;
-    postId: string;
-    message: string;
-    created_time: Date;
-}
-
-const postSchema = new Schema<IPost>({
-    pageId: String,
-    postId: String,
-    message: String,
-    created_time: Date,
+const PostSchema = new Schema({
+    pageId: { type: String, required: true },
+    postId: { type: String, required: true, unique: true },
+    message: { type: String },
+    created_time: { type: Date, index: true },
 });
 
-export default model<IPost>("Post", postSchema);
+export default mongoose.model("Post", PostSchema);

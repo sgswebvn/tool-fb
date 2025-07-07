@@ -1,23 +1,13 @@
-import { Schema, model, Document } from "mongoose";
+import mongoose, { Schema } from "mongoose";
 
-export interface IComment extends Document {
-    facebookId: string;
-    postId: string;
-    commentId: string;
-    message: string;
-    from: string;
-    created_time: Date;
-    parent_id?: string;
-}
-
-const commentSchema = new Schema<IComment>({
+const CommentSchema = new Schema({
     facebookId: { type: String, required: true },
     postId: { type: String, required: true },
-    commentId: { type: String, required: true },
-    message: String,
-    from: String,
-    created_time: { type: Date, required: true },
-    parent_id: { type: String, default: null },
+    commentId: { type: String, required: true, unique: true },
+    message: { type: String, required: true },
+    from: { type: String },
+    created_time: { type: Date, index: true },
+    parent_id: { type: String },
 });
 
-export default model<IComment>("Comment", commentSchema);
+export default mongoose.model("Comment", CommentSchema);
