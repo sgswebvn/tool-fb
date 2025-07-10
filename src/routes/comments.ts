@@ -9,9 +9,14 @@ const router = express.Router();
 router.get("/:postId", async (req: Request<{ postId: string }>, res: Response): Promise<void> => {
     try {
         const { postId } = req.params;
-        const { limit = 10, skip = 0 } = req.query; // Thêm phân trang
-        if (!postId) {
-            res.status(400).json({ error: "Thiếu postId" });
+        const { limit = 10, skip = 0 } = req.query;
+        if (!postId || postId === "undefined" || !/^[0-9_]+$/.test(postId)) {
+            res.status(400).json({ error: "postId không hợp lệ" });
+            return;
+        }
+        const post = await Post.findOne({ postId });
+        if (!post) {
+            res.status(404).json({ error: "Không tìm thấy bài đăng" });
             return;
         }
         const comments = await Comment.find({ postId })
@@ -21,6 +26,7 @@ router.get("/:postId", async (req: Request<{ postId: string }>, res: Response): 
             .lean();
         res.json(comments);
     } catch (error) {
+        console.error("❌ Lỗi khi lấy bình luận:", error);
         res.status(500).json({ error: "Lỗi máy chủ" });
     }
 });
@@ -79,5 +85,7 @@ router.post("/:postId", async (req: Request<{ postId: string }, any, { message: 
         res.status(500).json({ error: "Không thể tạo comment trên Facebook" });
     }
 });
+
+
 
 export default router;
