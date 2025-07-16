@@ -9,6 +9,7 @@ const CommentSchema = new Schema({
     created_time: { type: Date, index: true },
     parent_id: { type: String },
     direction: { type: String, enum: ["in", "out"], default: "in" },
+    hidden: { type: Boolean, default: false },
 });
 
 export default mongoose.model("Comment", CommentSchema);

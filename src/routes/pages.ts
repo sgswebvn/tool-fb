@@ -4,6 +4,7 @@ import User from "../models/User";
 import Package from "../models/Package";
 import { Request, Response } from "express";
 import { authMiddleware } from "../middleware/auth";
+import axios from "axios";
 
 interface AuthenticatedRequest extends Request {
     user?: { id: string; username: string };
@@ -40,9 +41,8 @@ router.get("/", authMiddleware, async (req: AuthenticatedRequest, res: Response)
         res.status(500).json({ error: "Không thể lấy danh sách trang" });
     }
 });
-
-// Kết nối (thêm/cập nhật) page
-router.post("/connect", authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+// pages.ts
+router.post("/connect", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
         const userId = req.user?.id;
         const { pageId, name, access_token } = req.body as ConnectPageRequestBody;
@@ -55,20 +55,13 @@ router.post("/connect", authMiddleware, async (req: AuthenticatedRequest, res: R
             res.status(404).json({ error: "Người dùng chưa kết nối Facebook" });
             return;
         }
-
-        // Lấy thông tin gói của user
         const userPackage = await Package.findOne({ name: user.package || "free" });
         const maxPages = userPackage ? userPackage.maxPages : 1;
-
-        // Đếm số page đã kết nối
         const pageCount = await Page.countDocuments({ facebookId: user.facebookId });
-
-        // Nếu đã đạt giới hạn thì không cho kết nối thêm
         if (pageCount >= maxPages) {
             res.status(403).json({ error: `Bạn đã đạt giới hạn số fanpage (${maxPages}). Vui lòng nâng cấp gói để kết nối thêm.` });
             return;
         }
-        // Cho phép nhiều page, tìm page theo facebookId + pageId
         let page = await Page.findOne({ facebookId: user.facebookId, pageId });
         if (!page) {
             page = new Page({
@@ -76,15 +69,17 @@ router.post("/connect", authMiddleware, async (req: AuthenticatedRequest, res: R
                 pageId,
                 name,
                 access_token,
-                expires_in: 5184000, // 60 ngày mặc định
+                expires_in: 5184000,
                 connected_at: new Date(),
                 connected: true,
+                picture: (await axios.get(`https://graph.facebook.com/${pageId}?fields=picture&access_token=${access_token}`)).data.picture?.data?.url,
             });
         } else {
             page.name = name;
             page.access_token = access_token;
             page.connected_at = new Date();
             page.connected = true;
+            page.picture = (await axios.get(`https://graph.facebook.com/${pageId}?fields=picture&access_token=${access_token}`)).data.picture?.data?.url;
         }
         await page.save();
         res.json({ success: true, pageId: page.pageId });

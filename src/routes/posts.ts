@@ -176,34 +176,23 @@ async function fetchNestedComments(commentId: string, access_token: string): Pro
     return allComments;
 }
 
+// posts.ts
 async function fetchAllComments(postId: string, access_token: string): Promise<FacebookComment[]> {
     let allComments: FacebookComment[] = [];
-    let url = `https://graph.facebook.com/v18.0/${postId}/comments?access_token=${access_token}&fields=id,message,from,created_time,parent&limit=100`;
-
+    let url = `https://graph.facebook.com/v18.0/${postId}/comments?access_token=${access_token}&fields=id,message,from.name,from.picture,created_time,parent&limit=100`;
     while (url) {
-        try {
-            const { data } = await axios.get(url);
-            if (!data.data) {
-                console.warn(`Không có dữ liệu bình luận cho post ${postId}`);
-                break;
+        const { data } = await axios.get(url);
+        if (!data.data) break;
+        allComments = [...allComments, ...data.data];
+        for (const comment of data.data) {
+            if (!comment.parent) {
+                const nestedComments = await fetchNestedComments(comment.id, access_token);
+                allComments = [...allComments, ...nestedComments];
             }
-            allComments = [...allComments, ...data.data];
-
-            for (const comment of data.data) {
-                if (!comment.parent) {
-                    const nestedComments = await fetchNestedComments(comment.id, access_token);
-                    allComments = [...allComments, ...nestedComments];
-                }
-            }
-            url = data.paging?.next || '';
-            if (url) await delay(500);
-        } catch (error: any) {
-            console.error(`Lỗi khi lấy bình luận cho post ${postId}:`, error.response?.data?.error || error.message);
-            throw error;
         }
+        url = data.paging?.next || '';
+        if (url) await delay(500);
     }
-
-    console.log(`Lấy được ${allComments.length} bình luận cho post ${postId}`);
     return allComments;
 }
 

@@ -181,7 +181,7 @@ router.put("/role", authMiddleware, adminMiddleware, async (req: Request<{}, {},
 
 // Facebook OAuth
 router.get("/facebook", authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-    const redirectUri = process.env.FB_REDIRECT_URI || "https://tool-fb.onrender.com/auth/facebook/callback";
+    const redirectUri = process.env.FB_REDIRECT_URI || "https://api.mutifacebook.pro.vn/auth/facebook/callback";
     const scope = "pages_messaging,pages_show_list";
     const token = req.headers.authorization?.split(" ")[1] || req.query.token;
     if (!token) {
@@ -234,33 +234,56 @@ router.get("/facebook/callback", async (req: Request, res: Response): Promise<vo
     }
 });
 
-
-// Lấy danh sách Fanpage
-router.get("/facebook/pages", authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+// auth.ts
+router.get("/facebook/pages", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
         const userId = req.user?.id;
-        if (!userId) {
-            res.status(401).json({ error: "Không tìm thấy thông tin người dùng" });
-            return;
-        }
         const user = await User.findById(userId);
         if (!user || !user.facebookId || !user.facebookAccessToken) {
             res.status(404).json({ error: "Người dùng chưa kết nối Facebook" });
             return;
         }
-
-        const { data: pages } = await axios.get(`https://graph.facebook.com/me/accounts?access_token=${user.facebookAccessToken}`);
-        res.json(
-            pages.data.map((page: any) => ({
-                pageId: page.id,
-                name: page.name,
-                access_token: page.access_token,
-            }))
-        );
+        const { data: pages } = await axios.get(`https://graph.facebook.com/me/accounts?access_token=${user.facebookAccessToken}&fields=id,name,access_token,picture`);
+        const pageData = pages.data.map((page: any) => ({
+            pageId: page.id,
+            name: page.name,
+            access_token: page.access_token,
+            picture: page.picture?.data?.url,
+        }));
+        for (const page of pageData) {
+            await Page.updateOne(
+                { pageId: page.pageId, facebookId: user.facebookId },
+                { picture: page.picture },
+                { upsert: true }
+            );
+        }
+        res.json(pageData);
     } catch (err: any) {
         console.error("❌ Error fetching Facebook pages:", err?.response?.data || err.message);
         res.status(500).json({ error: "Không thể lấy danh sách Fanpage", detail: err?.response?.data?.error?.message || err.message });
     }
 });
-
+router.get("/facebook/refresh", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+        const userId = req.user?.id;
+        const user = await User.findById(userId);
+        if (!user || !user.facebookAccessToken) {
+            res.status(404).json({ error: "Người dùng chưa kết nối Facebook" });
+            return;
+        }
+        const { data } = await axios.get(`https://graph.facebook.com/v18.0/oauth/access_token`, {
+            params: {
+                grant_type: "fb_exchange_token",
+                client_id: process.env.FB_APP_ID,
+                client_secret: process.env.FB_APP_SECRET,
+                fb_exchange_token: user.facebookAccessToken,
+            },
+        });
+        user.facebookAccessToken = data.access_token;
+        await user.save();
+        res.json({ success: true });
+    } catch (err: any) {
+        res.status(500).json({ error: "Không thể làm mới access token", detail: err?.response?.data?.error?.message || err.message });
+    }
+});
 export default router;

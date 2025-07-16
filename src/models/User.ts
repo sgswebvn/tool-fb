@@ -14,6 +14,7 @@ export interface IUser extends Document {
     createdAt?: Date;
     updatedAt?: Date;
     lastLogin?: Date;
+    picture?: string;
 }
 
 const userSchema = new Schema<IUser>({
@@ -30,6 +31,7 @@ const userSchema = new Schema<IUser>({
     createdAt: { type: Date, default: Date.now },
     updatedAt: { type: Date, default: Date.now },
     lastLogin: { type: Date, default: Date.now },
+    picture: String,
 });
 
 export default model<IUser>("User", userSchema);
