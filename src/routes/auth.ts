@@ -181,15 +181,19 @@ router.put("/role", authMiddleware, adminMiddleware, async (req: Request<{}, {},
 
 // Facebook OAuth
 router.get("/facebook", authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-    const redirectUri = process.env.FB_REDIRECT_URI || "https://api.mutifacebook.pro.vn/auth/facebook/callback";
-    const scope = "pages_messaging,pages_show_list";
-    const token = req.headers.authorization?.split(" ")[1] || req.query.token;
-    if (!token) {
-        res.status(401).json({ error: "Thiếu token xác thực" });
-        return
+    try {
+        const redirectUri = process.env.FB_REDIRECT_URI || "https://api.mutifacebook.pro.vn/auth/facebook/callback";
+        const scope = "pages_messaging,pages_show_list";
+        const token = req.headers.authorization?.split(" ")[1] || req.query.token;
+        if (!token) {
+            res.status(401).json({ error: "Thiếu token xác thực" });
+            return;
+        }
+        const authUrl = `https://www.facebook.com/v18.0/dialog/oauth?client_id=${process.env.FB_APP_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}&state=${token}`;
+        res.json({ url: authUrl });
+    } catch (error) {
+        res.status(500).json({ error: "Không thể tạo URL xác thực" });
     }
-    const authUrl = `https://www.facebook.com/v18.0/dialog/oauth?client_id=${process.env.FB_APP_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}&state=${token}`;
-    res.redirect(authUrl);
 });
 
 router.get("/facebook/callback", async (req: Request, res: Response): Promise<void> => {
