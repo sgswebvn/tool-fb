@@ -249,13 +249,6 @@ router.get("/facebook/pages", authMiddleware, async (req: AuthenticatedRequest, 
             access_token: page.access_token,
             picture: page.picture?.data?.url,
         }));
-        for (const page of pageData) {
-            await Page.updateOne(
-                { pageId: page.pageId, facebookId: user.facebookId },
-                { picture: page.picture },
-                { upsert: true }
-            );
-        }
         res.json(pageData);
     } catch (err: any) {
         console.error("❌ Error fetching Facebook pages:", err?.response?.data || err.message);

@@ -18,7 +18,6 @@ interface ConnectPageRequestBody {
 
 const router = express.Router();
 
-// Lấy danh sách page đã kết nối
 router.get("/", authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
         const userId = req.user?.id;
@@ -41,7 +40,7 @@ router.get("/", authMiddleware, async (req: AuthenticatedRequest, res: Response)
         res.status(500).json({ error: "Không thể lấy danh sách trang" });
     }
 });
-// pages.ts
+
 router.post("/connect", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
         const userId = req.user?.id;
@@ -57,7 +56,9 @@ router.post("/connect", authMiddleware, async (req: AuthenticatedRequest, res: R
         }
         const userPackage = await Package.findOne({ name: user.package || "free" });
         const maxPages = userPackage ? userPackage.maxPages : 1;
-        const pageCount = await Page.countDocuments({ facebookId: user.facebookId });
+        console.log("User package:", user.package, "Max pages:", maxPages);
+        const pageCount = await Page.countDocuments({ facebookId: user.facebookId, connected: true });
+        console.log("Current page count:", pageCount);
         if (pageCount >= maxPages) {
             res.status(403).json({ error: `Bạn đã đạt giới hạn số fanpage (${maxPages}). Vui lòng nâng cấp gói để kết nối thêm.` });
             return;
@@ -83,13 +84,12 @@ router.post("/connect", authMiddleware, async (req: AuthenticatedRequest, res: R
         }
         await page.save();
         res.json({ success: true, pageId: page.pageId });
-    } catch (error) {
-        res.status(500).json({ error: "Không thể kết nối Fanpage" });
+    } catch (error: any) {
+        console.error("❌ Error connecting page:", error.message);
+        res.status(500).json({ error: "Không thể kết nối Fanpage", detail: error.message });
     }
 });
 
-// Lấy thông tin chi tiết 1 page
-// posts.ts
 router.get("/:pageId", authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
         const { pageId } = req.params;
@@ -108,12 +108,12 @@ router.get("/:pageId", authMiddleware, async (req: AuthenticatedRequest, res: Re
             res.status(404).json({ error: "Không tìm thấy page hoặc bạn không có quyền" });
             return;
         }
+        res.json(page);
     } catch (error) {
-        res.status(500).json({ error: "Không thể lấy bài đăng từ Facebook" });
+        res.status(500).json({ error: "Không thể lấy thông tin page" });
     }
 });
 
-// Xóa 1 page
 router.delete("/:pageId", authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
         const userId = req.user?.id;
