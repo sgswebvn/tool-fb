@@ -22,25 +22,49 @@ const router = express.Router();
 
 const phoneRegex = /(0|\+84)(\d{9,10})\b/;
 
-// Delay function to avoid API rate limiting
+const userInfoCache: { [key: string]: any } = {};
+
+async function getFacebookUserInfo(senderId: string, accessToken: string) {
+    if (userInfoCache[senderId]) {
+        return userInfoCache[senderId];
+    }
+    try {
+        const { data } = await axios.get(
+            `https://graph.facebook.com/v18.0/${senderId}`,
+            {
+                params: {
+                    fields: "name,picture",
+                    access_token: accessToken,
+                },
+            }
+        );
+        userInfoCache[senderId] = data;
+        return data;
+    } catch {
+        return null;
+    }
+}
+
 async function delay(ms: number) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-// Fetch nested comments for a specific comment
 async function fetchNestedComments(commentId: string, access_token: string): Promise<FacebookComment[]> {
     let allComments: FacebookComment[] = [];
     let url = `https://graph.facebook.com/v18.0/${commentId}/comments?access_token=${access_token}&fields=id,message,from.name,from.picture.data.url,created_time,parent&limit=100`;
+    let pageCount = 0;
+    const maxPages = 3; // Limit nested comment pages
 
-    while (url) {
+    while (url && pageCount < maxPages) {
         try {
             const { data } = await axios.get(url);
-            if (!data.data) {
-                console.warn(`Không có dữ liệu bình luận cho comment ${commentId}`);
+            if (!Array.isArray(data.data)) {
+                console.warn(`Dữ liệu bình luận lồng nhau không hợp lệ cho comment ${commentId}`);
                 break;
             }
             allComments = [...allComments, ...data.data];
             url = data.paging?.next || "";
+            pageCount++;
             if (url) await delay(500);
         } catch (error: any) {
             console.error(`Lỗi khi lấy phản hồi lồng nhau cho comment ${commentId}:`, error?.response?.data?.error || error.message);
@@ -50,15 +74,18 @@ async function fetchNestedComments(commentId: string, access_token: string): Pro
     return allComments;
 }
 
-// Fetch all comments for a post
 async function fetchAllComments(postId: string, access_token: string): Promise<FacebookComment[]> {
     let allComments: FacebookComment[] = [];
     let url = `https://graph.facebook.com/v18.0/${postId}/comments?access_token=${access_token}&fields=id,message,from.name,from.picture.data.url,created_time,parent&limit=100`;
+    let pageCount = 0;
+    const maxPages = 5; // Limit comment pages
 
-    while (url) {
+    while (url && pageCount < maxPages) {
         try {
             const { data } = await axios.get(url);
-            if (!data.data) break;
+            if (!Array.isArray(data.data)) {
+                throw new Error("Dữ liệu bình luận không hợp lệ từ Facebook");
+            }
             allComments = [...allComments, ...data.data];
             for (const comment of data.data) {
                 if (!comment.parent) {
@@ -67,6 +94,7 @@ async function fetchAllComments(postId: string, access_token: string): Promise<F
                 }
             }
             url = data.paging?.next || "";
+            pageCount++;
             if (url) await delay(500);
         } catch (error: any) {
             console.error(`Lỗi khi lấy bình luận cho post ${postId}:`, error?.response?.data?.error || error.message);
@@ -76,7 +104,6 @@ async function fetchAllComments(postId: string, access_token: string): Promise<F
     return allComments;
 }
 
-// Get comments for a post
 router.get("/:postId", authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
         const { postId } = req.params;
@@ -87,9 +114,9 @@ router.get("/:postId", authMiddleware, async (req: AuthenticatedRequest, res: Re
             return;
         }
 
-        const user = await User.findById(req.user?.id);
-        if (!user || !user.facebookId) {
-            res.status(404).json({ error: "Người dùng chưa kết nối Facebook" });
+        const user = await User.findById(req.user?.id).lean();
+        if (!user || !user.isActive || !user.facebookId) {
+            res.status(404).json({ error: "Người dùng chưa kết nối Facebook hoặc tài khoản bị khóa" });
             return;
         }
 
@@ -105,17 +132,14 @@ router.get("/:postId", authMiddleware, async (req: AuthenticatedRequest, res: Re
             return;
         }
 
-        // Check if token is expired
         if (page.expires_in && new Date().getTime() > new Date(page.connected_at).getTime() + page.expires_in * 1000) {
             await Page.updateOne({ pageId: post.pageId }, { connected: false });
             res.status(400).json({ error: "Token của trang đã hết hạn. Vui lòng kết nối lại qua Facebook." });
             return;
         }
 
-        // Fetch comments from Facebook
         const comments = await fetchAllComments(postId, page.access_token);
 
-        // Save or update comments in database
         const bulkOps = comments.map(cmt => ({
             updateOne: {
                 filter: { commentId: cmt.id },
@@ -138,7 +162,6 @@ router.get("/:postId", authMiddleware, async (req: AuthenticatedRequest, res: Re
             await Comment.bulkWrite(bulkOps);
         }
 
-        // Retrieve comments from database with pagination
         const savedComments = await Comment.find({ postId })
             .sort({ created_time: 1 })
             .limit(Number(limit))
@@ -155,13 +178,16 @@ router.get("/:postId", authMiddleware, async (req: AuthenticatedRequest, res: Re
             res.status(400).json({ error: "Token của trang đã hết hạn. Vui lòng kết nối lại qua Facebook." });
         } else if (errorCode === 4) {
             res.status(429).json({ error: "Đã vượt quá giới hạn API. Vui lòng thử lại sau." });
+        } else if (errorCode === 100) {
+            res.status(400).json({ error: "Tham số không hợp lệ trong yêu cầu Facebook" });
+        } else if (errorCode === 200) {
+            res.status(403).json({ error: "Quyền truy cập không đủ hoặc token không hợp lệ" });
         } else {
             res.status(500).json({ error: "Không thể lấy bình luận từ Facebook", detail: error.message });
         }
     }
 });
 
-// Post a comment or reply to a comment
 router.post("/:postId", authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
         const { postId } = req.params;
@@ -172,9 +198,9 @@ router.post("/:postId", authMiddleware, async (req: AuthenticatedRequest, res: R
             return;
         }
 
-        const user = await User.findById(req.user?.id);
-        if (!user || !user.facebookId) {
-            res.status(404).json({ error: "Người dùng chưa kết nối Facebook" });
+        const user = await User.findById(req.user?.id).lean();
+        if (!user || !user.isActive || !user.facebookId) {
+            res.status(404).json({ error: "Người dùng chưa kết nối Facebook hoặc tài khoản bị khóa" });
             return;
         }
 
@@ -190,14 +216,12 @@ router.post("/:postId", authMiddleware, async (req: AuthenticatedRequest, res: R
             return;
         }
 
-        // Check if token is expired
         if (page.expires_in && new Date().getTime() > new Date(page.connected_at).getTime() + page.expires_in * 1000) {
             await Page.updateOne({ pageId: post.pageId }, { connected: false });
             res.status(400).json({ error: "Token của trang đã hết hạn. Vui lòng kết nối lại qua Facebook." });
             return;
         }
 
-        // Post comment or reply to Facebook
         let fbRes;
         if (!parentId) {
             fbRes = await axios.post(`https://graph.facebook.com/v18.0/${postId}/comments`, { message }, {
@@ -210,8 +234,8 @@ router.post("/:postId", authMiddleware, async (req: AuthenticatedRequest, res: R
         }
 
         const fbCommentId = fbRes.data.id;
+        const hidden = phoneRegex.test(message);
 
-        // Save comment to database
         const comment = new Comment({
             postId,
             commentId: fbCommentId,
@@ -221,12 +245,11 @@ router.post("/:postId", authMiddleware, async (req: AuthenticatedRequest, res: R
             created_time: new Date(),
             parent_id: parentId || null,
             facebookId: page.facebookId,
-            hidden: phoneRegex.test(message) ? true : false,
+            hidden,
         });
         await comment.save();
 
-        // Hide comment on Facebook if it contains a phone number
-        if (phoneRegex.test(message)) {
+        if (hidden) {
             await axios.post(`https://graph.facebook.com/v18.0/${fbCommentId}?hide=true`, {}, {
                 params: { access_token: page.access_token },
             });
@@ -234,6 +257,20 @@ router.post("/:postId", authMiddleware, async (req: AuthenticatedRequest, res: R
             if (io) {
                 io.to(post.pageId).emit("fb_comment_hidden", { commentId: fbCommentId, hidden: true });
             }
+        }
+
+        const io = req.app.get("io");
+        if (io) {
+            io.to(post.pageId).emit("fb_comment", {
+                postId,
+                commentId: fbCommentId,
+                message,
+                from: page.name || "Fanpage",
+                created_time: comment.created_time,
+                parent_id: parentId || null,
+                picture: page.picture || null,
+                hidden,
+            });
         }
 
         res.json(comment);
@@ -246,13 +283,16 @@ router.post("/:postId", authMiddleware, async (req: AuthenticatedRequest, res: R
             res.status(400).json({ error: "Token của trang đã hết hạn. Vui lòng kết nối lại qua Facebook." });
         } else if (errorCode === 4) {
             res.status(429).json({ error: "Đã vượt quá giới hạn API. Vui lòng thử lại sau." });
+        } else if (errorCode === 100) {
+            res.status(400).json({ error: "Tham số không hợp lệ trong yêu cầu Facebook" });
+        } else if (errorCode === 200) {
+            res.status(403).json({ error: "Quyền truy cập không đủ hoặc token không hợp lệ" });
         } else {
             res.status(500).json({ error: "Không thể tạo bình luận trên Facebook", detail: error.message });
         }
     }
 });
 
-// Hide or unhide a comment
 router.post("/:commentId/hide", authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
         const { commentId } = req.params;
@@ -263,9 +303,9 @@ router.post("/:commentId/hide", authMiddleware, async (req: AuthenticatedRequest
             return;
         }
 
-        const user = await User.findById(req.user?.id);
-        if (!user || !user.facebookId) {
-            res.status(404).json({ error: "Người dùng chưa kết nối Facebook" });
+        const user = await User.findById(req.user?.id).lean();
+        if (!user || !user.isActive || !user.facebookId) {
+            res.status(404).json({ error: "Người dùng chưa kết nối Facebook hoặc tài khoản bị khóa" });
             return;
         }
 
@@ -275,25 +315,22 @@ router.post("/:commentId/hide", authMiddleware, async (req: AuthenticatedRequest
             return;
         }
 
-        const comment = await Comment.findOne({ commentId, facebookId: page.facebookId });
-        if (!comment) {
-            res.status(404).json({ error: "Không tìm thấy bình luận" });
-            return;
-        }
-
-        // Check if token is expired
         if (page.expires_in && new Date().getTime() > new Date(page.connected_at).getTime() + page.expires_in * 1000) {
             await Page.updateOne({ pageId }, { connected: false });
             res.status(400).json({ error: "Token của trang đã hết hạn. Vui lòng kết nối lại qua Facebook." });
             return;
         }
 
-        // Update comment visibility on Facebook
+        const comment = await Comment.findOne({ commentId, facebookId: page.facebookId });
+        if (!comment) {
+            res.status(404).json({ error: "Không tìm thấy bình luận" });
+            return;
+        }
+
         await axios.post(`https://graph.facebook.com/v18.0/${commentId}?hide=${hide}`, {}, {
             params: { access_token: page.access_token },
         });
 
-        // Update comment in database
         comment.hidden = hide;
         await comment.save();
 
@@ -306,12 +343,15 @@ router.post("/:commentId/hide", authMiddleware, async (req: AuthenticatedRequest
     } catch (error: any) {
         console.error("❌ Lỗi khi ẩn/hiện bình luận:", error?.response?.data?.error || error.message);
         const errorCode = error?.response?.data?.error?.code;
-        const { pageId } = req.body; // Use pageId from request body
-        if (errorCode === 190 && pageId) {
-            await Page.updateOne({ pageId }, { connected: false });
+        if (errorCode === 190) {
+            await Page.updateOne({ pageId: req.body.pageId }, { connected: false });
             res.status(400).json({ error: "Token của trang đã hết hạn. Vui lòng kết nối lại qua Facebook." });
         } else if (errorCode === 4) {
             res.status(429).json({ error: "Đã vượt quá giới hạn API. Vui lòng thử lại sau." });
+        } else if (errorCode === 100) {
+            res.status(400).json({ error: "Tham số không hợp lệ trong yêu cầu Facebook" });
+        } else if (errorCode === 200) {
+            res.status(403).json({ error: "Quyền truy cập không đủ hoặc token không hợp lệ" });
         } else {
             res.status(500).json({ error: "Không thể ẩn/hiện bình luận", detail: error.message });
         }

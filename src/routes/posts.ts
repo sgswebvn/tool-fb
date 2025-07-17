@@ -20,12 +20,10 @@ interface FacebookPost {
 
 const router = express.Router();
 
-// Delay function to avoid API rate limiting
 async function delay(ms: number) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-// Get posts for a page
 router.get("/:pageId", authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
         const { pageId } = req.params;
@@ -36,9 +34,9 @@ router.get("/:pageId", authMiddleware, async (req: AuthenticatedRequest, res: Re
             return;
         }
 
-        const user = await User.findById(req.user?.id);
-        if (!user || !user.facebookId) {
-            res.status(404).json({ error: "Người dùng chưa kết nối Facebook" });
+        const user = await User.findById(req.user?.id).lean();
+        if (!user || !user.isActive || !user.facebookId) {
+            res.status(404).json({ error: "Người dùng chưa kết nối Facebook hoặc tài khoản bị khóa" });
             return;
         }
 
@@ -48,23 +46,26 @@ router.get("/:pageId", authMiddleware, async (req: AuthenticatedRequest, res: Re
             return;
         }
 
-        // Check if token is expired
         if (page.expires_in && new Date().getTime() > new Date(page.connected_at).getTime() + page.expires_in * 1000) {
             await Page.updateOne({ pageId }, { connected: false });
             res.status(400).json({ error: "Token của trang đã hết hạn. Vui lòng kết nối lại qua Facebook." });
             return;
         }
 
-        // Fetch posts from Facebook
         let allPosts: FacebookPost[] = [];
         let url = `https://graph.facebook.com/v18.0/${pageId}/posts?access_token=${page.access_token}&fields=id,message,created_time,full_picture,likes.summary(true),shares&limit=50`;
+        let pageCount = 0;
+        const maxPages = 5; // Limit API calls to avoid rate limit
 
-        while (url) {
+        while (url && pageCount < maxPages) {
             try {
                 const { data } = await axios.get(url);
-                if (!data.data) break;
+                if (!Array.isArray(data.data)) {
+                    throw new Error("Dữ liệu bài đăng không hợp lệ từ Facebook");
+                }
                 allPosts = [...allPosts, ...data.data];
                 url = data.paging?.next || "";
+                pageCount++;
                 if (url) await delay(500);
             } catch (error: any) {
                 console.error(`Lỗi khi lấy bài đăng cho page ${pageId}:`, error?.response?.data?.error || error.message);
@@ -72,7 +73,6 @@ router.get("/:pageId", authMiddleware, async (req: AuthenticatedRequest, res: Re
             }
         }
 
-        // Save or update posts in database
         const bulkOps = allPosts.map(post => ({
             updateOne: {
                 filter: { postId: post.id },
@@ -93,7 +93,6 @@ router.get("/:pageId", authMiddleware, async (req: AuthenticatedRequest, res: Re
             await Post.bulkWrite(bulkOps);
         }
 
-        // Retrieve posts from database with pagination
         const posts = await Post.find({ pageId })
             .sort({ created_time: -1 })
             .limit(Number(limit))
@@ -104,12 +103,15 @@ router.get("/:pageId", authMiddleware, async (req: AuthenticatedRequest, res: Re
     } catch (error: any) {
         console.error("❌ Lỗi khi lấy bài đăng từ Facebook:", error?.response?.data?.error || error.message);
         const errorCode = error?.response?.data?.error?.code;
-        const { pageId } = req.params;
         if (errorCode === 190) {
-            await Page.updateOne({ pageId }, { connected: false });
+            await Page.updateOne({ pageId: req.params.pageId }, { connected: false });
             res.status(400).json({ error: "Token của trang đã hết hạn. Vui lòng kết nối lại qua Facebook." });
         } else if (errorCode === 4) {
             res.status(429).json({ error: "Đã vượt quá giới hạn API. Vui lòng thử lại sau." });
+        } else if (errorCode === 100) {
+            res.status(400).json({ error: "Tham số không hợp lệ trong yêu cầu Facebook" });
+        } else if (errorCode === 200) {
+            res.status(403).json({ error: "Quyền truy cập không đủ hoặc token không hợp lệ" });
         } else {
             res.status(500).json({ error: "Không thể lấy bài đăng từ Facebook", detail: error.message });
         }

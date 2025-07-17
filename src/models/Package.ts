@@ -8,9 +8,9 @@ export interface IPackage extends Document {
 }
 
 const packageSchema = new Schema<IPackage>({
-    name: { type: String, required: true, unique: true },
-    maxPages: { type: Number, required: true },
-    price: { type: Number, required: true },
+    name: { type: String, required: true, unique: true, index: true },
+    maxPages: { type: Number, required: true, min: 1 },
+    price: { type: Number, required: true, min: 0 },
     customizable: { type: Boolean, default: false },
 });
 
