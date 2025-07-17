@@ -195,22 +195,19 @@ router.get("/facebook", authMiddleware, async (req: AuthenticatedRequest, res: R
         res.status(500).json({ error: "Không thể tạo URL xác thực" });
     }
 });
-
 router.get("/facebook/callback", async (req: Request, res: Response): Promise<void> => {
     const code = req.query.code as string;
-    const token = req.query.state as string; // Lấy token từ state
+    const token = req.query.state as string;
 
-    if (!token) {
-        res.status(401).json({ error: "Thiếu token xác thực" });
+    if (!token || !code) {
+        res.status(401).json({ error: "Thiếu token xác thực hoặc code" });
         return;
     }
 
     try {
-        // Xác thực token, lấy userId
         const decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
         const userId = decoded.id;
 
-        // Lấy access_token Facebook
         const { data: tokenData } = await axios.get(`https://graph.facebook.com/v18.0/oauth/access_token`, {
             params: {
                 client_id: process.env.FB_APP_ID,
@@ -220,18 +217,16 @@ router.get("/facebook/callback", async (req: Request, res: Response): Promise<vo
             },
         });
 
-        // Lấy facebookId
-        const { data: fbUser } = await axios.get(`https://graph.facebook.com/me?fields=id&access_token=${tokenData.access_token}`);
+        const { data: fbUser } = await axios.get(`https://graph.facebook.com/me?fields=id,name,email&access_token=${tokenData.access_token}`);
         const facebookId = fbUser.id;
 
-        // Lưu vào DB
         await User.updateOne(
             { _id: userId },
-            { facebookId, facebookAccessToken: tokenData.access_token },
+            { facebookId, facebookAccessToken: tokenData.access_token, name: fbUser.name, email: fbUser.email || undefined },
             { upsert: true }
         );
 
-        res.redirect("http://localhost:3000/dashboard");
+        res.json({ success: true, redirect: "/dashboard" });
     } catch (err: any) {
         console.error("❌ Facebook login error:", err?.response?.data || err.message);
         res.status(500).json({ error: "Kết nối Facebook thất bại", detail: err?.response?.data?.error?.message || err.message });
