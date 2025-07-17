@@ -61,6 +61,7 @@ async function getFacebookUserInfo(senderId: string, accessToken: string) {
             }
         );
         userInfoCache[senderId] = data;
+        setTimeout(() => delete userInfoCache[senderId], 3600 * 1000);
         return data;
     } catch {
         return null;
@@ -197,9 +198,9 @@ export default (io: Server) => {
                             const userInfo = await getFacebookUserInfo(msg.from.id, page.access_token);
                             const avatar = userInfo?.picture?.data?.url || null;
                             const messageId = msg.id || uuidv4();
-                            await Message.updateOne(
-                                { id: messageId, pageId },
-                                {
+                            const existingMessage = await Message.findOne({ id: messageId, pageId });
+                            if (!existingMessage) {
+                                await Message.create({
                                     id: messageId,
                                     senderId: msg.from.id,
                                     senderName: msg.from.name,
@@ -210,9 +211,25 @@ export default (io: Server) => {
                                     facebookId: user.facebookId,
                                     pageId,
                                     avatar,
-                                },
-                                { upsert: true }
-                            );
+                                    conversationId: conv.id, // Lưu conversationId
+                                });
+                                // Phát sự kiện socket cho tin nhắn mới
+                                const io = req.app.get("io");
+                                if (io) {
+                                    io.to(pageId).emit("fb_message", {
+                                        id: messageId,
+                                        pageId,
+                                        conversationId: conv.id,
+                                        senderId: msg.from.id,
+                                        senderName: msg.from.name,
+                                        recipientId: msg.to.id,
+                                        message: msg.message,
+                                        direction: msg.from.id === pageId ? "out" : "in",
+                                        timestamp: msg.created_time,
+                                        avatar,
+                                    });
+                                }
+                            }
                             return {
                                 id: messageId,
                                 senderId: msg.from.id,
@@ -303,6 +320,7 @@ export default (io: Server) => {
                 senderId: recipientId,
                 direction: "in",
             }).sort({ timestamp: -1 });
+            const conversationId = lastMessage?.conversationId || recipientId; // Fallback nếu không có
             const isWithin24Hours = lastMessage && (new Date().getTime() - new Date(lastMessage.timestamp).getTime()) <= 24 * 60 * 60 * 1000;
             const payload: any = {
                 recipient: { id: recipientId },
@@ -313,30 +331,37 @@ export default (io: Server) => {
             const response = await axios.post(`https://graph.facebook.com/v18.0/me/messages?access_token=${page.access_token}`, payload);
             const newMessageId = response.data.message_id || uuidv4();
             const pageInfo = await getFacebookUserInfo(pageId, page.access_token);
-            const newMsg = await Message.create({
-                id: newMessageId,
-                facebookId: user.facebookId,
-                pageId,
-                senderId: pageId,
-                senderName: page.name || "Page",
-                recipientId,
-                message,
-                direction: "out",
-                timestamp: new Date().toISOString(),
-                avatar: pageInfo?.picture?.data?.url || null,
-            });
-            io.to(pageId).emit("fb_message", {
-                id: newMessageId,
-                pageId,
-                senderId: pageId,
-                senderName: page.name || "Page",
-                recipientId,
-                message,
-                direction: "out",
-                timestamp: newMsg.timestamp,
-                avatar: pageInfo?.picture?.data?.url || null,
-            });
-            res.json({ success: true, message: newMsg });
+            const existingMessage = await Message.findOne({ id: newMessageId, pageId });
+            if (!existingMessage) {
+                const newMsg = await Message.create({
+                    id: newMessageId,
+                    facebookId: user.facebookId,
+                    pageId,
+                    senderId: pageId,
+                    senderName: page.name || "Page",
+                    recipientId,
+                    message,
+                    direction: "out",
+                    timestamp: new Date().toISOString(),
+                    avatar: pageInfo?.picture?.data?.url || null,
+                    conversationId,
+                });
+                io.to(pageId).emit("fb_message", {
+                    id: newMessageId,
+                    pageId,
+                    conversationId,
+                    senderId: pageId,
+                    senderName: page.name || "Page",
+                    recipientId,
+                    message,
+                    direction: "out",
+                    timestamp: newMsg.timestamp,
+                    avatar: pageInfo?.picture?.data?.url || null,
+                });
+                res.json({ success: true, message: newMsg });
+            } else {
+                res.json({ success: false, error: "Tin nhắn đã tồn tại", message: existingMessage });
+            }
         } catch (err: any) {
             console.error("❌ Lỗi khi gửi tin nhắn:", err?.response?.data || err.message);
             const errorMessage = err.response?.data?.error?.message || "Không thể gửi tin nhắn";

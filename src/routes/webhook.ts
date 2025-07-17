@@ -58,35 +58,45 @@ router.post("/", async (req: Request, res: Response) => {
                     const senderId = event.sender.id;
                     const recipientId = event.recipient.id;
                     const message = event.message.text || "";
-                    const userInfo = await getFacebookUserInfo(senderId, page.access_token);
                     const messageId = event.message.mid || uuidv4();
+                    const conversationId = event.conversation?.id || senderId; // Lấy conversationId từ webhook nếu có
 
-                    const newMsg = await Message.create({
-                        id: messageId,
-                        facebookId: page.facebookId,
-                        pageId,
-                        senderId,
-                        senderName: userInfo?.name || "Unknown",
-                        recipientId,
-                        message,
-                        direction: senderId === pageId ? "out" : "in",
-                        timestamp: new Date(),
-                        avatar: userInfo?.picture?.data?.url || null,
-                    });
-
-                    const io = req.app.get("io");
-                    if (io) {
-                        io.to(pageId).emit("fb_message", {
+                    // Kiểm tra và cập nhật hoặc chèn tin nhắn
+                    const existingMsg = await Message.findOne({ id: messageId, pageId });
+                    if (!existingMsg) {
+                        const userInfo = await getFacebookUserInfo(senderId, page.access_token);
+                        const newMsg = await Message.create({
                             id: messageId,
+                            facebookId: page.facebookId,
                             pageId,
                             senderId,
                             senderName: userInfo?.name || "Unknown",
                             recipientId,
                             message,
                             direction: senderId === pageId ? "out" : "in",
-                            timestamp: newMsg.timestamp,
+                            timestamp: new Date(),
                             avatar: userInfo?.picture?.data?.url || null,
+                            conversationId, // Thêm conversationId
                         });
+                        console.log(`Tạo mới tin nhắn ${messageId} cho page ${pageId}`);
+
+                        const io = req.app.get("io");
+                        if (io) {
+                            io.to(pageId).emit("fb_message", {
+                                id: messageId,
+                                pageId,
+                                conversationId,
+                                senderId,
+                                senderName: userInfo?.name || "Unknown",
+                                recipientId,
+                                message,
+                                direction: senderId === pageId ? "out" : "in",
+                                timestamp: newMsg.timestamp,
+                                avatar: userInfo?.picture?.data?.url || null,
+                            });
+                        }
+                    } else {
+                        console.log(`Tin nhắn ${messageId} đã tồn tại, bỏ qua chèn mới`);
                     }
                 }
             }
@@ -103,38 +113,44 @@ router.post("/", async (req: Request, res: Response) => {
                             await axios.post(`https://graph.facebook.com/v18.0/${comment.comment_id}?hide=true`, {}, {
                                 params: { access_token: page.access_token },
                             });
+                            console.log(`Ẩn bình luận ${comment.comment_id} do chứa số điện thoại`);
                         } catch (error: any) {
                             console.error(`Lỗi khi ẩn bình luận ${comment.comment_id}:`, error?.response?.data?.error || error.message);
                         }
                     }
 
-                    const newComment = await Comment.create({
-                        postId: comment.post_id,
-                        commentId: comment.comment_id,
-                        message: comment.message,
-                        from: userInfo?.name || "Unknown",
-                        created_time: new Date(comment.created_time),
-                        parent_id: comment.parent_id || null,
-                        picture: userInfo?.picture?.data?.url || null,
-                        facebookId: page.facebookId,
-                        hidden,
-                    });
-
-                    const io = req.app.get("io");
-                    if (io) {
-                        io.to(pageId).emit("fb_comment", {
+                    const existingComment = await Comment.findOne({ commentId: comment.comment_id, pageId });
+                    if (!existingComment) {
+                        const newComment = await Comment.create({
                             postId: comment.post_id,
                             commentId: comment.comment_id,
                             message: comment.message,
                             from: userInfo?.name || "Unknown",
-                            created_time: comment.created_time,
+                            created_time: new Date(comment.created_time),
                             parent_id: comment.parent_id || null,
                             picture: userInfo?.picture?.data?.url || null,
+                            facebookId: page.facebookId,
                             hidden,
                         });
-                        if (hidden) {
-                            io.to(pageId).emit("fb_comment_hidden", { commentId: comment.comment_id, hidden: true });
+
+                        const io = req.app.get("io");
+                        if (io) {
+                            io.to(pageId).emit("fb_comment", {
+                                postId: comment.post_id,
+                                commentId: comment.comment_id,
+                                message: comment.message,
+                                from: userInfo?.name || "Unknown",
+                                created_time: comment.created_time,
+                                parent_id: comment.parent_id || null,
+                                picture: userInfo?.picture?.data?.url || null,
+                                hidden,
+                            });
+                            if (hidden) {
+                                io.to(pageId).emit("fb_comment_hidden", { commentId: comment.comment_id, hidden: true });
+                            }
                         }
+                    } else {
+                        console.log(`Bình luận ${comment.comment_id} đã tồn tại, bỏ qua chèn mới`);
                     }
                 }
 
@@ -145,33 +161,38 @@ router.post("/", async (req: Request, res: Response) => {
                     const message = post.message || "";
                     const createdTime = post.created_time;
 
-                    const bulkOps = [{
-                        updateOne: {
-                            filter: { postId },
-                            update: {
-                                pageId,
-                                postId,
-                                message,
-                                created_time: new Date(createdTime),
-                                picture: post.photo_id ? `https://graph.facebook.com/${post.photo_id}/picture?access_token=${page.access_token}` : null,
-                                likes: 0,
-                                shares: 0,
+                    const existingPost = await Post.findOne({ postId, pageId });
+                    if (!existingPost) {
+                        const bulkOps = [{
+                            updateOne: {
+                                filter: { postId, pageId },
+                                update: {
+                                    pageId,
+                                    postId,
+                                    message,
+                                    created_time: new Date(createdTime),
+                                    picture: post.photo_id ? `https://graph.facebook.com/${post.photo_id}/picture?access_token=${page.access_token}` : null,
+                                    likes: 0,
+                                    shares: 0,
+                                },
+                                upsert: true,
                             },
-                            upsert: true,
-                        },
-                    }];
+                        }];
 
-                    await Post.bulkWrite(bulkOps);
+                        await Post.bulkWrite(bulkOps);
 
-                    const io = req.app.get("io");
-                    if (io) {
-                        io.to(pageId).emit("fb_post", {
-                            postId,
-                            pageId,
-                            message,
-                            created_time: createdTime,
-                            picture: post.photo_id ? `https://graph.facebook.com/${post.photo_id}/picture?access_token=${page.access_token}` : null,
-                        });
+                        const io = req.app.get("io");
+                        if (io) {
+                            io.to(pageId).emit("fb_post", {
+                                postId,
+                                pageId,
+                                message,
+                                created_time: createdTime,
+                                picture: post.photo_id ? `https://graph.facebook.com/${post.photo_id}/picture?access_token=${page.access_token}` : null,
+                            });
+                        }
+                    } else {
+                        console.log(`Bài viết ${postId} đã tồn tại, bỏ qua chèn mới`);
                     }
                 }
             }
