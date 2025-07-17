@@ -6,6 +6,7 @@ const CommentSchema = new Schema({
     commentId: { type: String, required: true, unique: true },
     message: { type: String, required: true },
     from: { type: String },
+    picture: { type: String, default: null },
     created_time: { type: Date, index: true },
     parent_id: { type: String },
     direction: { type: String, enum: ["in", "out"], default: "in" },

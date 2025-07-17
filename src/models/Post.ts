@@ -5,7 +5,9 @@ const PostSchema = new Schema({
     postId: { type: String, required: true, unique: true },
     message: { type: String },
     created_time: { type: Date, index: true },
-    picture: { type: String, default: null},
+    picture: { type: String, default: null },
+    likes: { type: Number, default: 0 },
+    shares: { type: Number, default: 0 },
 });
 
 export default mongoose.model("Post", PostSchema);
