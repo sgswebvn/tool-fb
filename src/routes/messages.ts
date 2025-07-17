@@ -198,7 +198,7 @@ export default (io: Server) => {
                             const userInfo = await getFacebookUserInfo(msg.from.id, page.access_token);
                             const avatar = userInfo?.picture?.data?.url || null;
                             const messageId = msg.id || uuidv4();
-                            const existingMessage = await Message.findOne({ id: messageId, pageId });
+                            const existingMessage = await Message.findOne({ id: messageId, pageId }).lean();
                             if (!existingMessage) {
                                 await Message.create({
                                     id: messageId,
@@ -211,24 +211,8 @@ export default (io: Server) => {
                                     facebookId: user.facebookId,
                                     pageId,
                                     avatar,
-                                    conversationId: conv.id, // Lưu conversationId
+                                    conversationId: conv.id,
                                 });
-                                // Phát sự kiện socket cho tin nhắn mới
-                                const io = req.app.get("io");
-                                if (io) {
-                                    io.to(pageId).emit("fb_message", {
-                                        id: messageId,
-                                        pageId,
-                                        conversationId: conv.id,
-                                        senderId: msg.from.id,
-                                        senderName: msg.from.name,
-                                        recipientId: msg.to.id,
-                                        message: msg.message,
-                                        direction: msg.from.id === pageId ? "out" : "in",
-                                        timestamp: msg.created_time,
-                                        avatar,
-                                    });
-                                }
                             }
                             return {
                                 id: messageId,
@@ -239,6 +223,7 @@ export default (io: Server) => {
                                 timestamp: msg.created_time,
                                 direction: msg.from.id === pageId ? "out" : "in",
                                 avatar,
+                                followed: existingMessage?.followed || false, // Bao gồm trạng thái followed
                             };
                         })
                     );
@@ -430,14 +415,14 @@ export default (io: Server) => {
             const message = await Message.findOneAndUpdate(
                 { id: messageId, pageId, facebookId: user.facebookId },
                 { followed },
-                { new: true }
+                { new: true, lean: true }
             );
             if (!message) {
                 res.status(404).json({ error: "Không tìm thấy tin nhắn" });
                 return;
             }
             io.to(pageId).emit("fb_message_followed", { messageId, followed });
-            res.json(message);
+            res.json({ success: true, message });
         } catch (error: any) {
             console.error("❌ Lỗi khi cập nhật trạng thái theo dõi:", error.message);
             res.status(500).json({ error: "Không thể cập nhật trạng thái theo dõi", detail: error.message });

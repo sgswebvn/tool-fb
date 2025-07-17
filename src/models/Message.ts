@@ -13,6 +13,7 @@ export interface IMessage extends Document {
     timestamp: Date;
     avatar?: string | null;
     attachments?: { type: string; url: string }[];
+    followed?: boolean;
 }
 
 const messageSchema = new Schema<IMessage>({
@@ -28,6 +29,7 @@ const messageSchema = new Schema<IMessage>({
     timestamp: { type: Date, default: Date.now, index: true },
     avatar: { type: String, sparse: true },
     attachments: [{ type: { type: String }, url: { type: String } }],
+    followed: { type: Boolean, default: false },
 });
 
 // Compound index for common queries
