@@ -30,7 +30,7 @@ async function getFacebookUserInfo(senderId: string, accessToken: string) {
     }
     try {
         const { data } = await axios.get(
-            `https://graph.facebook.com/v18.0/${senderId}`,
+            `https://graph.facebook.com/v23.0/${senderId}`,
             {
                 params: {
                     fields: "name,picture",
@@ -51,7 +51,7 @@ async function delay(ms: number) {
 
 async function fetchNestedComments(commentId: string, access_token: string): Promise<FacebookComment[]> {
     let allComments: FacebookComment[] = [];
-    let url = `https://graph.facebook.com/v18.0/${commentId}/comments?access_token=${access_token}&fields=id,message,from.name,from.picture.data.url,created_time,parent&limit=100`;
+    let url = `https://graph.facebook.com/v23.0/${commentId}/comments?access_token=${access_token}&fields=id,message,from.name,from.picture.data.url,created_time,parent&limit=100`;
     let pageCount = 0;
     const maxPages = 3; // Limit nested comment pages
 
@@ -76,7 +76,7 @@ async function fetchNestedComments(commentId: string, access_token: string): Pro
 
 async function fetchAllComments(postId: string, access_token: string): Promise<FacebookComment[]> {
     let allComments: FacebookComment[] = [];
-    let url = `https://graph.facebook.com/v18.0/${postId}/comments?access_token=${access_token}&fields=id,message,from.name,from.picture.data.url,created_time,parent&limit=100`;
+    let url = `https://graph.facebook.com/v23.0/${postId}/comments?access_token=${access_token}&fields=id,message,from.name,from.picture.data.url,created_time,parent&limit=100`;
     let pageCount = 0;
     const maxPages = 5; // Limit comment pages
 
@@ -101,6 +101,7 @@ async function fetchAllComments(postId: string, access_token: string): Promise<F
             throw error;
         }
     }
+    console.log("postId:", postId);
     return allComments;
 }
 
@@ -224,11 +225,11 @@ router.post("/:postId", authMiddleware, async (req: AuthenticatedRequest, res: R
 
         let fbRes;
         if (!parentId) {
-            fbRes = await axios.post(`https://graph.facebook.com/v18.0/${postId}/comments`, { message }, {
+            fbRes = await axios.post(`https://graph.facebook.com/v23.0/${postId}/comments`, { message }, {
                 params: { access_token: page.access_token },
             });
         } else {
-            fbRes = await axios.post(`https://graph.facebook.com/v18.0/${parentId}/comments`, { message }, {
+            fbRes = await axios.post(`https://graph.facebook.com/v23.0/${parentId}/comments`, { message }, {
                 params: { access_token: page.access_token },
             });
         }
@@ -250,7 +251,7 @@ router.post("/:postId", authMiddleware, async (req: AuthenticatedRequest, res: R
         await comment.save();
 
         if (hidden) {
-            await axios.post(`https://graph.facebook.com/v18.0/${fbCommentId}?hide=true`, {}, {
+            await axios.post(`https://graph.facebook.com/v23.0/${fbCommentId}?hide=true`, {}, {
                 params: { access_token: page.access_token },
             });
             const io = req.app.get("io");
@@ -327,7 +328,7 @@ router.post("/:commentId/hide", authMiddleware, async (req: AuthenticatedRequest
             return;
         }
 
-        await axios.post(`https://graph.facebook.com/v18.0/${commentId}?hide=${hide}`, {}, {
+        await axios.post(`https://graph.facebook.com/v23.0/${commentId}?hide=${hide}`, {}, {
             params: { access_token: page.access_token },
         });
 

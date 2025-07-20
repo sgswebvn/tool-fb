@@ -110,7 +110,7 @@ router.post("/", async (req: Request, res: Response) => {
 
                     if (hidden) {
                         try {
-                            await axios.post(`https://graph.facebook.com/v18.0/${comment.comment_id}?hide=true`, {}, {
+                            await axios.post(`https://graph.facebook.com/v23.0/${comment.comment_id}?hide=true`, {}, {
                                 params: { access_token: page.access_token },
                             });
                             console.log(`Ẩn bình luận ${comment.comment_id} do chứa số điện thoại`);

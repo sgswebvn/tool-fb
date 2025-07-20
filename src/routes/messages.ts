@@ -52,7 +52,7 @@ async function getFacebookUserInfo(senderId: string, accessToken: string) {
     }
     try {
         const { data } = await axios.get(
-            `https://graph.facebook.com/v18.0/${senderId}`,
+            `https://graph.facebook.com/v23.0/${senderId}`,
             {
                 params: {
                     fields: "id,name,gender,picture",
@@ -165,7 +165,7 @@ export default (io: Server) => {
                 return;
             }
             const { data: conversations } = await axios.get<{ data: FacebookConversation[] }>(
-                `https://graph.facebook.com/v18.0/${pageId}/conversations`,
+                `https://graph.facebook.com/v23.0/${pageId}/conversations`,
                 { params: { access_token: page.access_token, limit: Number(limit), offset: Number(skip) } }
             );
             if (!Array.isArray(conversations.data)) {
@@ -175,7 +175,7 @@ export default (io: Server) => {
             const messagesByConversation = await Promise.all(
                 conversations.data.map(async (conv: FacebookConversation) => {
                     const { data: messages } = await axios.get<{ data: FacebookMessage[] }>(
-                        `https://graph.facebook.com/v18.0/${conv.id}/messages`,
+                        `https://graph.facebook.com/v23.0/${conv.id}/messages`,
                         {
                             params: {
                                 access_token: page.access_token,
@@ -313,7 +313,7 @@ export default (io: Server) => {
                 messaging_type: isWithin24Hours ? "RESPONSE" : "MESSAGE_TAG",
                 tag: isWithin24Hours ? undefined : "ACCOUNT_UPDATE",
             };
-            const response = await axios.post(`https://graph.facebook.com/v18.0/me/messages?access_token=${page.access_token}`, payload);
+            const response = await axios.post(`https://graph.facebook.com/v23.0/me/messages?access_token=${page.access_token}`, payload);
             const newMessageId = response.data.message_id || uuidv4();
             const pageInfo = await getFacebookUserInfo(pageId, page.access_token);
             const existingMessage = await Message.findOne({ id: newMessageId, pageId });
@@ -381,6 +381,7 @@ export default (io: Server) => {
                 res.status(500).json({ error: errorMessage, detail: err?.response?.data?.error?.message || err.message });
             }
         }
+        console.log("Request body:", req.body);
     });
 
     router.post("/:messageId/follow", authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {

@@ -212,7 +212,7 @@ router.get("/facebook", authMiddleware, async (req: AuthenticatedRequest, res: R
             res.status(401).json({ error: "Thiếu token xác thực" });
             return;
         }
-        const authUrl = `https://www.facebook.com/v18.0/dialog/oauth?client_id=${process.env.FB_APP_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}&state=${token}`;
+        const authUrl = `https://www.facebook.com//dialog/oauth?client_id=${process.env.FB_APP_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}&state=${token}`;
         res.json({ url: authUrl });
     } catch (error: any) {
         console.error("❌ Lỗi tạo URL xác thực:", error.message);
@@ -238,7 +238,7 @@ router.get("/facebook/callback", async (req: Request, res: Response): Promise<vo
             return;
         }
 
-        const { data: tokenData } = await axios.get(`https://graph.facebook.com/v18.0/oauth/access_token`, {
+        const { data: tokenData } = await axios.get(`https://graph.facebook.com//oauth/access_token`, {
             params: {
                 client_id: process.env.FB_APP_ID,
                 client_secret: process.env.FB_APP_SECRET,
@@ -256,7 +256,8 @@ router.get("/facebook/callback", async (req: Request, res: Response): Promise<vo
             { upsert: true }
         );
 
-        res.json({ success: true, redirect: "/dashboard" });
+        // res.json({ success: true, redirect: "/dashboard" });
+        res.redirect("dashboard/fanpages")
     } catch (err: any) {
         console.error("❌ Facebook login error:", err?.response?.data || err.message);
         const errorMessage = err.response?.data?.error?.message || "Kết nối Facebook thất bại";
@@ -313,7 +314,7 @@ router.get("/facebook/refresh", authMiddleware, async (req: AuthenticatedRequest
             res.status(404).json({ error: "Người dùng chưa kết nối Facebook hoặc tài khoản bị khóa" });
             return;
         }
-        const { data } = await axios.get(`https://graph.facebook.com/v18.0/oauth/access_token`, {
+        const { data } = await axios.get(`https://graph.facebook.com/v23.0/oauth/access_token`, {
             params: {
                 grant_type: "fb_exchange_token",
                 client_id: process.env.FB_APP_ID,

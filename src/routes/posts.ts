@@ -53,7 +53,7 @@ router.get("/:pageId", authMiddleware, async (req: AuthenticatedRequest, res: Re
         }
 
         let allPosts: FacebookPost[] = [];
-        let url = `https://graph.facebook.com/v18.0/${pageId}/posts?access_token=${page.access_token}&fields=id,message,created_time,full_picture,likes.summary(true),shares&limit=50`;
+        let url = `https://graph.facebook.com/v23.0/${pageId}/posts?access_token=${page.access_token}&fields=id,message,created_time,full_picture,likes.summary(true),shares&limit=50`;
         let pageCount = 0;
         const maxPages = 5; // Limit API calls to avoid rate limit
 

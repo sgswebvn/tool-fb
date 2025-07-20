@@ -32,7 +32,7 @@ export async function getFacebookPages(accessToken: string): Promise<FacebookPag
 export async function refreshAccessToken(pageId: string) {
     const page = await Page.findOne({ pageId });
     if (!page) throw new Error("Không tìm thấy page");
-    const { data } = await axios.get(`https://graph.facebook.com/v18.0/oauth/access_token`, {
+    const { data } = await axios.get(`https://graph.facebook.com/v23.0/oauth/access_token`, {
         params: {
             grant_type: "fb_exchange_token",
             client_id: process.env.FB_APP_ID,
