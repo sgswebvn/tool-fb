@@ -1,21 +1,46 @@
 import "dotenv/config";
 import http from "http";
-import { Server } from "socket.io";
+import { Server, Socket } from "socket.io";
 import mongoose from "mongoose";
+import Redis from "ioredis";
+import winston from "winston";
 import app from "./app";
-import messageRoutes from "./routes/messages";
+import messageRoutes, { setupSocketHandlers } from "./routes/messages";
+import logger from "./logger"; // Import logger
+
+// Initialize Redis
+const redis = new Redis(process.env.REDIS_URL || "redis://localhost:6379");
+redis.on("connect", () => logger.info("✅ Redis connected"));
+redis.on("error", () => logger.error("Redis error"));
 
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: "*" } });
+const io = new Server(server, {
+    cors: { origin: process.env.NODE_ENV === "production" ? "https://your-frontend-domain.com" : "*" },
+    connectionStateRecovery: {
+        maxDisconnectionDuration: 2 * 60 * 1000, // 2 minutes
+        skipMiddlewares: true
+    }
+});
 
 app.set("io", io);
+app.set("redis", redis);
+app.set("logger", logger);
 app.use("/messages", messageRoutes(io));
+
+// Set up socket connection and handlers
+io.on("connection", (socket: Socket) => {
+    setupSocketHandlers(socket); // Set up socket event handlers
+    logger.info("A user connected", { userId: socket.data?.user?.id });
+});
 
 const PORT = process.env.PORT || 3001;
 
 mongoose.connect(process.env.MONGO_URI as string).then(() => {
-    console.log("✅ MongoDB connected");
+    logger.info("✅ MongoDB connected");
     server.listen(PORT, () => {
-        console.log(`🚀 Server running at http://localhost:${PORT}`);
+        logger.info(`🚀 Server running at http://localhost:${PORT}`);
     });
+}).catch((err) => {
+    logger.error("❌ MongoDB connection error", { error: err.message });
+    process.exit(1);
 });

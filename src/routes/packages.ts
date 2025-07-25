@@ -1,88 +1,135 @@
-import express, { Request, Response, NextFunction } from "express";
+import express, { Request, Response } from "express";
+import Redis from "ioredis";
 import Package from "../models/Package";
 import { authMiddleware, adminMiddleware } from "../middleware/auth";
+import winston from "winston";
 
-const router = express.Router();
 interface AuthenticatedRequest extends Request {
     user?: { id: string; username: string; role: string };
 }
-// Ensure index on name field in Package schema
-// Add to schema: Package.index({ name: 1 }, { unique: true });
 
-router.get("/", async (_req: Request, res: Response) => {
+const router = express.Router();
+
+/**
+ * Get all packages
+ * @route GET /packages
+ */
+router.get("/", authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const logger = req.app.get("logger") as winston.Logger;
+    const redis = req.app.get("redis") as Redis;
+
     try {
+        const cacheKey = "packages:all";
+        const cached = await redis.get(cacheKey);
+        if (cached) {
+            res.json(JSON.parse(cached));
+            return;
+        }
+
         const packages = await Package.find().lean();
+        await redis.setex(cacheKey, 3600, JSON.stringify(packages)); // Cache for 1 hour
+
+        logger.info("Packages fetched", { userId: req.user?.id, count: packages.length });
         res.json(packages);
     } catch (error: any) {
-        console.error("❌ Lỗi lấy danh sách gói:", error.message);
+        logger.error("Error fetching packages", { error: error.message, userId: req.user?.id });
         res.status(500).json({ error: "Không thể lấy danh sách gói", detail: error.message });
     }
 });
 
-router.post("/", authMiddleware, adminMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-    try {
-        const { name, maxPages, price, customizable } = req.body;
-        if (!name || !maxPages || price === undefined) {
-            res.status(400).json({ error: "Thiếu thông tin bắt buộc" });
-            return
-        }
-        if (maxPages <= 0 || price < 0) {
-            res.status(400).json({ error: "maxPages phải lớn hơn 0 và price không được âm" });
-            return
-        }
-        const pkg = await Package.create({ name, maxPages, price, customizable });
-        res.status(201).json(pkg);
-    } catch (error: any) {
-        console.error("❌ Lỗi tạo gói:", error.message);
-        if (error.code === 11000) {
-            res.status(400).json({ error: "Tên gói đã tồn tại" });
-        } else {
-            res.status(500).json({ error: "Không thể tạo gói", detail: error.message });
-        }
-    }
-});
+/**
+ * Get package by ID
+ * @route GET /packages/:id
+ */
+router.get("/:id", authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const logger = req.app.get("logger") as winston.Logger;
+    const redis = req.app.get("redis") as Redis;
+    const { id } = req.params;
 
-router.put("/:id", authMiddleware, adminMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
-        const { id } = req.params;
-        const { name, maxPages, price, customizable } = req.body;
-        if (!name || !maxPages || price === undefined) {
-            res.status(400).json({ error: "Thiếu thông tin bắt buộc" });
-            return
+        const cacheKey = `package:${id}`;
+        const cached = await redis.get(cacheKey);
+        if (cached) {
+            res.json(JSON.parse(cached));
+            return;
         }
-        if (maxPages <= 0 || price < 0) {
-            res.status(400).json({ error: "maxPages phải lớn hơn 0 và price không được âm" });
-            return
+
+        const pkg = await Package.findById(id).lean();
+        if (!pkg) {
+            res.status(404).json({ error: "Không tìm thấy gói" });
+            return;
         }
-        const pkg = await Package.findByIdAndUpdate(
-            id,
-            { name, maxPages, price, customizable },
-            { new: true, runValidators: true }
-        );
-        if (!pkg) res.status(404).json({ error: "Không tìm thấy gói" });
-        return
+
+        await redis.setex(cacheKey, 3600, JSON.stringify(pkg)); // Cache for 1 hour
+        logger.info("Package fetched", { packageId: id, userId: req.user?.id });
         res.json(pkg);
     } catch (error: any) {
-        console.error("❌ Lỗi cập nhật gói:", error.message);
-        if (error.code === 11000) {
-            res.status(400).json({ error: "Tên gói đã tồn tại" });
-        } else {
-            res.status(500).json({ error: "Không thể cập nhật gói", detail: error.message });
-        }
+        logger.error("Error fetching package", { error: error.message, userId: req.user?.id });
+        res.status(500).json({ error: "Không thể lấy thông tin gói", detail: error.message });
     }
 });
 
-router.delete("/:id", authMiddleware, adminMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+/**
+ * Create new package (admin only)
+ * @route POST /packages
+ * @body {name, maxPages, price, customizable, description, duration}
+ */
+router.post("/", [authMiddleware, adminMiddleware], async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const logger = req.app.get("logger") as winston.Logger;
+    const redis = req.app.get("redis") as Redis;
+    const { name, maxPages, price, customizable, description, duration } = req.body;
+
     try {
-        const { id } = req.params;
-        const pkg = await Package.findByIdAndDelete(id);
-        if (!pkg)
-            res.status(404).json({ error: "Không tìm thấy gói" });
-        return
-        res.json({ success: true });
+        if (!name || !maxPages || price == null) {
+            res.status(400).json({ error: "Thiếu thông tin bắt buộc" });
+            return;
+        }
+
+        const pkg = new Package({ name, maxPages, price, customizable, description, duration });
+        await pkg.save();
+
+        await redis.del("packages:all"); // Invalidate cache
+        logger.info("Package created", { packageId: pkg._id, userId: req.user?.id });
+        res.status(201).json(pkg);
     } catch (error: any) {
-        console.error("❌ Lỗi xóa gói:", error.message);
-        res.status(500).json({ error: "Không thể xóa gói", detail: error.message });
+        logger.error("Error creating package", { error: error.message, userId: req.user?.id });
+        res.status(500).json({ error: "Không thể tạo gói", detail: error.message });
+    }
+});
+
+/**
+ * Update package (admin only)
+ * @route PUT /packages/:id
+ * @body {name, maxPages, price, customizable, description, duration}
+ */
+router.put("/:id", [authMiddleware, adminMiddleware], async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const logger = req.app.get("logger") as winston.Logger;
+    const redis = req.app.get("redis") as Redis;
+    const { id } = req.params;
+    const { name, maxPages, price, customizable, description, duration } = req.body;
+
+    try {
+        const pkg = await Package.findById(id);
+        if (!pkg) {
+            res.status(404).json({ error: "Không tìm thấy gói" });
+            return;
+        }
+
+        pkg.name = name || pkg.name;
+        pkg.maxPages = maxPages || pkg.maxPages;
+        pkg.price = price != null ? price : pkg.price;
+        pkg.customizable = customizable != null ? customizable : pkg.customizable;
+        pkg.description = description || pkg.description;
+        pkg.duration = duration || pkg.duration;
+        await pkg.save();
+
+        await redis.del(`package:${id}`);
+        await redis.del("packages:all"); // Invalidate cache
+        logger.info("Package updated", { packageId: id, userId: req.user?.id });
+        res.json(pkg);
+    } catch (error: any) {
+        logger.error("Error updating package", { error: error.message, userId: req.user?.id });
+        res.status(500).json({ error: "Không thể cập nhật gói", detail: error.message });
     }
 });
 

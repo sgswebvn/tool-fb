@@ -1,23 +1,24 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
-import User from "../models/User"; // Import User model để lấy thông tin role
+import User from "../models/User";
 
 interface JwtPayload {
     id: string;
     username: string;
+    role: string;
     iat?: number;
     exp?: number;
 }
 
 interface AuthenticatedRequest extends Request {
-    user?: JwtPayload & { role: string }; // Thêm role vào interface
+    user?: JwtPayload;
 }
+
 export function authMiddleware(
     req: AuthenticatedRequest,
     res: Response,
     next: NextFunction
 ): void {
-    // Lấy token từ header hoặc query string
     let token: string | undefined;
 
     const authHeader = req.headers.authorization;
@@ -39,30 +40,8 @@ export function authMiddleware(
 
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET) as JwtPayload;
-
-        // Kiểm tra token hết hạn
-        if (decoded.exp && decoded.exp * 1000 < Date.now()) {
-            res.status(401).json({ error: "Token đã hết hạn" });
-            return;
-        }
-
-        // Lấy thông tin người dùng từ database để lấy role
-        User.findById(decoded.id)
-            .then((user) => {
-                if (!user) {
-                    res.status(401).json({ error: "Người dùng không tồn tại" });
-                    return;
-                }
-                req.user = {
-                    id: decoded.id,
-                    username: decoded.username,
-                    role: user.role, // Gán role từ database
-                };
-                next();
-            })
-            .catch((err) => {
-                res.status(500).json({ error: "Lỗi truy vấn người dùng", detail: err.message });
-            });
+        req.user = decoded;
+        next();
     } catch (err: any) {
         if (err.name === "TokenExpiredError") {
             res.status(401).json({ error: "Token đã hết hạn" });

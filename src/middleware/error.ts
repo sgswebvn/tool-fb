@@ -1,10 +1,26 @@
-import { NextFunction, Request, Response } from "express";
-import app from "../app";
+import { Request, Response, NextFunction } from "express";
+import winston from "winston";
 
-export function errorHandler(err: any, req: Request, res: Response, next: NextFunction) {
-    console.error("❌ Error:", err);
-    res.status(err.status || 500).json({
-        error: err.message || "Lỗi máy chủ",
-        detail: err.detail || null,
-    });
+interface CustomRequest extends Request {
+    user?: { id: string; username: string; role: string };
 }
+
+export const errorMiddleware = (err: any, req: CustomRequest, res: Response, next: NextFunction): void => {
+    const logger = req.app.get("logger") as winston.Logger;
+
+    const errorDetails = {
+        message: err.message || "Lỗi không xác định",
+        status: err.status || 500,
+        stack: process.env.NODE_ENV === "development" ? err.stack : undefined,
+        userId: req.user?.id || "unknown",
+        path: req.path,
+        method: req.method,
+    };
+
+    logger.error("Error occurred", errorDetails);
+
+    res.status(errorDetails.status).json({
+        error: errorDetails.message,
+        detail: process.env.NODE_ENV === "development" ? err.stack : undefined,
+    });
+};

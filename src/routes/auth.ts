@@ -1,340 +1,293 @@
 import express, { Request, Response } from "express";
-import bcrypt from "bcryptjs";
+import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
+import Redis from "ioredis";
+import validator from "validator";
 import axios from "axios";
-import crypto from "crypto";
+import winston from "winston";
 import User from "../models/User";
-import Page from "../models/Page";
-import { sendResetMail } from "../services/mailer";
-import { authMiddleware, adminMiddleware } from "../middleware/auth";
-
-const router = express.Router();
-
-interface RegisterRequestBody {
-    email: string;
-    password: string;
-    name: string;
-    role?: "admin" | "user" | "guest";
-}
-
-interface LoginRequestBody {
-    email: string;
-    password: string;
-}
-
-interface ForgotRequestBody {
-    email: string;
-}
-
-interface ResetRequestBody {
-    token: string;
-    password: string;
-}
-
-interface UpdateRoleRequestBody {
-    userId: string;
-    role: "admin" | "user" | "guest";
-}
+import Package from "../models/Package";
+import rateLimit from "express-rate-limit";
 
 interface AuthenticatedRequest extends Request {
     user?: { id: string; username: string; role: string };
 }
 
-const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+interface RegisterBody {
+    name: string;
+    email: string;
+    password: string;
+}
 
-router.post("/register", async (req: Request<{}, {}, RegisterRequestBody>, res: Response): Promise<void> => {
+interface LoginBody {
+    email: string;
+    password: string;
+}
+
+interface FacebookLoginBody {
+    accessToken: string;
+}
+
+const router = express.Router();
+
+// Rate limiter for login and register endpoints
+const loginLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 10, // Limit each IP to 10 requests per window
+    message: "Quá nhiều yêu cầu đăng nhập. Vui lòng thử lại sau 15 phút.",
+});
+
+const registerLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000, // 1 hour
+    max: 5, // Limit each IP to 5 requests per window
+    message: "Quá nhiều yêu cầu đăng ký. Vui lòng thử lại sau 1 giờ.",
+});
+
+/**
+ * Register new user
+ * @route POST /auth/register
+ * @body {name, email, password}
+ */
+router.post("/register", registerLimiter, async (req: Request, res: Response): Promise<void> => {
+    const logger = req.app.get("logger") as winston.Logger;
+    const redis = req.app.get("redis") as Redis;
+    const { name, email, password } = req.body as RegisterBody;
+
     try {
-        const { email, password, name } = req.body;
-        if (!email || !password || !name) {
+        // Input validation
+        if (!name || !email || !password) {
             res.status(400).json({ error: "Thiếu thông tin bắt buộc" });
             return;
         }
-        if (!emailRegex.test(email)) {
+
+        if (!validator.isEmail(email)) {
             res.status(400).json({ error: "Email không hợp lệ" });
             return;
         }
-        const existing = await User.findOne({ email });
-        if (existing) {
-            res.status(400).json({ error: "Email đã tồn tại" });
-            return;
-        }
-        const hash = await bcrypt.hash(password, 10);
-        const user = await User.create({ email, password: hash, name, role: "user", package: "free", isActive: true });
-        const token = jwt.sign({ id: user._id, username: name, role: user.role }, process.env.JWT_SECRET!, {
-            expiresIn: "7d",
-        });
-        res.json({
-            success: true,
-            token,
-            user: { id: user._id, email: user.email, name: user.name, role: user.role },
-        });
-    } catch (error: any) {
-        console.error("❌ Đăng ký thất bại:", error.message);
-        res.status(500).json({ error: "Đăng ký thất bại", detail: error.message });
-    }
-});
 
-router.post("/login", async (req: Request<{}, {}, LoginRequestBody>, res: Response): Promise<void> => {
-    try {
-        const { email, password } = req.body;
-        if (!email || !password) {
-            res.status(400).json({ error: "Thiếu email hoặc password" });
+        if (password.length < 6) {
+            res.status(400).json({ error: "Mật khẩu phải có ít nhất 6 ký tự" });
             return;
         }
-        if (!emailRegex.test(email)) {
-            res.status(400).json({ error: "Email không hợp lệ" });
-            return;
-        }
-        const user = await User.findOne({ email });
-        if (!user || !user.isActive) {
-            res.status(400).json({ error: "Không tìm thấy tài khoản hoặc tài khoản bị khóa" });
-            return;
-        }
-        const valid = await bcrypt.compare(password, user.password);
-        if (!valid) {
-            res.status(400).json({ error: "Sai mật khẩu" });
-            return;
-        }
-        const token = jwt.sign({ id: user._id, username: user.name, role: user.role }, process.env.JWT_SECRET!, { expiresIn: "7d" });
-        res.json({
-            token,
-            user: { id: user._id, email: user.email, name: user.name, role: user.role },
-        });
-    } catch (error: any) {
-        console.error("❌ Đăng nhập thất bại:", error.message);
-        res.status(500).json({ error: "Đăng nhập thất bại", detail: error.message });
-    }
-});
 
-router.post("/forgot", async (req: Request<{}, {}, ForgotRequestBody>, res: Response): Promise<void> => {
-    try {
-        const { email } = req.body;
-        if (!email || !emailRegex.test(email)) {
-            res.status(400).json({ error: "Email không hợp lệ" });
+        if (name.length < 2 || name.length > 50) {
+            res.status(400).json({ error: "Tên phải từ 2 đến 50 ký tự" });
             return;
         }
-        const user = await User.findOne({ email });
-        if (!user || !user.isActive) {
-            res.status(400).json({ error: "Không tìm thấy tài khoản hoặc tài khoản bị khóa" });
+
+        const existingUser = await User.findOne({ email }).lean();
+        if (existingUser) {
+            res.status(400).json({ error: "Email đã được sử dụng" });
             return;
         }
-        const token = crypto.randomBytes(20).toString("hex");
-        user.resetToken = token;
-        user.resetTokenExpire = new Date(Date.now() + 3600 * 1000);
+
+        const hashedPassword = await bcrypt.hash(password, 10);
+        const user = new User({
+            name,
+            email,
+            password: hashedPassword,
+            role: "user",
+            package: "basic",
+            isActive: true,
+        });
         await user.save();
-        await sendResetMail(email, token);
-        res.json({ success: true });
-    } catch (error: any) {
-        console.error("❌ Lỗi gửi email reset:", error.message);
-        res.status(500).json({ error: "Không thể gửi email đặt lại mật khẩu", detail: error.message });
-    }
-});
 
-router.post("/reset", async (req: Request<{}, {}, ResetRequestBody>, res: Response): Promise<void> => {
-    try {
-        const { token, password } = req.body;
-        if (!token || !password) {
-            res.status(400).json({ error: "Thiếu token hoặc password" });
-            return;
-        }
-        const user = await User.findOne({ resetToken: token, resetTokenExpire: { $gt: new Date() } });
-        if (!user || !user.isActive) {
-            res.status(400).json({ error: "Token không hợp lệ hoặc đã hết hạn" });
-            return;
-        }
-        user.password = await bcrypt.hash(password, 10);
-        user.resetToken = undefined;
-        user.resetTokenExpire = undefined;
-        await user.save();
-        res.json({ success: true });
-    } catch (error: any) {
-        console.error("❌ Đặt lại mật khẩu thất bại:", error.message);
-        res.status(500).json({ error: "Đặt lại mật khẩu thất bại", detail: error.message });
-    }
-});
-
-router.get("/me", authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-    try {
-        const userId = req.user?.id;
-        if (!userId) {
-            res.status(401).json({ error: "Không tìm thấy thông tin người dùng" });
-            return;
-        }
-        const user = await User.findById(userId).lean();
-        if (!user || !user.isActive) {
-            res.status(404).json({ error: "Người dùng không tồn tại hoặc bị khóa" });
-            return;
-        }
-        res.json({
-            id: user._id,
-            email: user.email,
-            name: user.name,
-            role: user.role,
-            facebookId: user.facebookId,
-        });
-    } catch (error: any) {
-        console.error("❌ Lỗi lấy thông tin người dùng:", error.message);
-        res.status(500).json({ error: "Không thể lấy thông tin người dùng", detail: error.message });
-    }
-});
-
-router.put("/role", authMiddleware, adminMiddleware, async (req: Request<{}, {}, UpdateRoleRequestBody>, res: Response): Promise<void> => {
-    try {
-        const { userId, role } = req.body;
-        if (!userId || !role) {
-            res.status(400).json({ error: "Thiếu userId hoặc role" });
-            return;
-        }
-        if (!["admin", "user", "guest"].includes(role)) {
-            res.status(400).json({ error: "Vai trò không hợp lệ" });
-            return;
-        }
-        const user = await User.findById(userId);
-        if (!user || !user.isActive) {
-            res.status(404).json({ error: "Người dùng không tồn tại hoặc bị khóa" });
-            return;
-        }
-        user.role = role;
-        await user.save();
-        res.json({ success: true, user: { id: user._id, email: user.email, name: user.name, role: user.role } });
-    } catch (error: any) {
-        console.error("❌ Cập nhật vai trò thất bại:", error.message);
-        res.status(500).json({ error: "Cập nhật vai trò thất bại", detail: error.message });
-    }
-});
-
-router.get("/facebook", authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-    try {
-        const redirectUri = process.env.FB_REDIRECT_URI || "https://api.mutifacebook.pro.vn/auth/facebook/callback";
-        const scope = "pages_messaging,pages_show_list";
-        const token = req.headers.authorization?.split(" ")[1] || req.query.token;
-        if (!token) {
-            res.status(401).json({ error: "Thiếu token xác thực" });
-            return;
-        }
-        const authUrl = `https://www.facebook.com//dialog/oauth?client_id=${process.env.FB_APP_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}&state=${token}`;
-        res.json({ url: authUrl });
-    } catch (error: any) {
-        console.error("❌ Lỗi tạo URL xác thực:", error.message);
-        res.status(500).json({ error: "Không thể tạo URL xác thực", detail: error.message });
-    }
-});
-
-router.get("/facebook/callback", async (req: Request, res: Response): Promise<void> => {
-    const code = req.query.code as string;
-    const token = req.query.state as string;
-
-    if (!token || !code) {
-        res.status(401).json({ error: "Thiếu token xác thực hoặc code" });
-        return;
-    }
-
-    try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
-        const userId = decoded.id;
-        const user = await User.findById(userId);
-        if (!user || !user.isActive) {
-            res.status(404).json({ error: "Người dùng không tồn tại hoặc bị khóa" });
-            return;
-        }
-
-        const { data: tokenData } = await axios.get(`https://graph.facebook.com//oauth/access_token`, {
-            params: {
-                client_id: process.env.FB_APP_ID,
-                client_secret: process.env.FB_APP_SECRET,
-                redirect_uri: process.env.FB_REDIRECT_URI,
-                code,
-            },
-        });
-
-        const { data: fbUser } = await axios.get(`https://graph.facebook.com/me?fields=id,name,email&access_token=${tokenData.access_token}`);
-        const facebookId = fbUser.id;
-
-        await User.updateOne(
-            { _id: userId },
-            { facebookId, facebookAccessToken: tokenData.access_token, name: fbUser.name, email: fbUser.email || undefined },
-            { upsert: true }
+        const token = jwt.sign(
+            { id: user._id, username: user.name, role: user.role },
+            process.env.JWT_SECRET || "default-secret-key",
+            { expiresIn: "1h" }
         );
 
-        // res.json({ success: true, redirect: "/dashboard" });
-        res.redirect("dashboard/fanpages")
-    } catch (err: any) {
-        console.error("❌ Facebook login error:", err?.response?.data || err.message);
-        const errorMessage = err.response?.data?.error?.message || "Kết nối Facebook thất bại";
-        const errorCode = err.response?.data?.error?.code;
-        if (errorCode === 100) {
-            res.status(400).json({ error: "Tham số không hợp lệ trong yêu cầu Facebook", detail: errorMessage });
-        } else if (errorCode === 190) {
-            res.status(400).json({ error: "Token không hợp lệ", detail: errorMessage });
-        } else {
-            res.status(500).json({ error: "Kết nối Facebook thất bại", detail: errorMessage });
-        }
+        const refreshToken = jwt.sign(
+            { id: user._id },
+            process.env.JWT_REFRESH_SECRET || "default-refresh-secret",
+            { expiresIn: "7d" }
+        );
+
+        await redis.setex(`refresh_token:${user._id}`, 7 * 24 * 60 * 60, refreshToken); // Cache refresh token for 7 days
+
+        logger.info("User registered", { userId: user._id, email });
+        res.status(201).json({ token, refreshToken, user: { id: user._id, name: user.name, email: user.email, role: user.role } });
+    } catch (error: any) {
+        logger.error("Error registering user", { error: error.message, email });
+        res.status(500).json({ error: "Không thể đăng ký người dùng", detail: error.message });
     }
 });
 
-router.get("/facebook/pages", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+/**
+ * Login user
+ * @route POST /auth/login
+ * @body {email, password}
+ */
+router.post("/login", loginLimiter, async (req: Request, res: Response): Promise<void> => {
+    const logger = req.app.get("logger") as winston.Logger;
+    const redis = req.app.get("redis") as Redis;
+    const { email, password } = req.body as LoginBody;
+
     try {
-        const userId = req.user?.id;
-        const user = await User.findById(userId);
-        if (!user || !user.isActive || !user.facebookId || !user.facebookAccessToken) {
-            res.status(404).json({ error: "Người dùng chưa kết nối Facebook hoặc tài khoản bị khóa" });
+        if (!email || !password) {
+            res.status(400).json({ error: "Thiếu email hoặc mật khẩu" });
             return;
         }
-        const { data: pages } = await axios.get(`https://graph.facebook.com/me/accounts?access_token=${user.facebookAccessToken}&fields=id,name,access_token,picture`);
-        if (!Array.isArray(pages.data)) {
-            res.status(500).json({ error: "Dữ liệu fanpage không hợp lệ từ Facebook" });
+
+        const user = await User.findOne({ email }).select("+password").lean();
+        if (!user || !user.isActive) {
+            res.status(401).json({ error: "Email hoặc mật khẩu không đúng, hoặc tài khoản bị khóa" });
             return;
         }
-        const pageData = pages.data.map((page: any) => ({
-            pageId: page.id,
-            name: page.name,
-            access_token: page.access_token,
-            picture: page.picture?.data?.url,
-        }));
-        res.json(pageData);
-    } catch (err: any) {
-        console.error("❌ Error fetching Facebook pages:", err?.response?.data || err.message);
-        const errorMessage = err.response?.data?.error?.message || "Không thể lấy danh sách Fanpage";
-        const errorCode = err.response?.data?.error?.code;
-        if (errorCode === 190) {
-            res.status(400).json({ error: "Token không hợp lệ", detail: errorMessage });
-        } else if (errorCode === 4) {
-            res.status(429).json({ error: "Đã vượt quá giới hạn API. Vui lòng thử lại sau.", detail: errorMessage });
-        } else {
-            res.status(500).json({ error: errorMessage, detail: err?.response?.data?.error?.message || err.message });
+
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch) {
+            res.status(401).json({ error: "Email hoặc mật khẩu không đúng" });
+            return;
         }
+
+        const token = jwt.sign(
+            { id: user._id, username: user.name, role: user.role },
+            process.env.JWT_SECRET || "default-secret-key",
+            { expiresIn: "1h" }
+        );
+
+        const refreshToken = jwt.sign(
+            { id: user._id },
+            process.env.JWT_REFRESH_SECRET || "default-refresh-secret",
+            { expiresIn: "7d" }
+        );
+
+        await redis.setex(`refresh_token:${user._id}`, 7 * 24 * 60 * 60, refreshToken); // Cache refresh token for 7 days
+
+        logger.info("User logged in", { userId: user._id, email });
+        res.json({ token, refreshToken, user: { id: user._id, name: user.name, email: user.email, role: user.role } });
+    } catch (error: any) {
+        logger.error("Error logging in user", { error: error.message, email });
+        res.status(500).json({ error: "Không thể đăng nhập", detail: error.message });
     }
 });
 
-router.get("/facebook/refresh", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+/**
+ * Refresh JWT token
+ * @route POST /auth/refresh
+ * @body {refreshToken}
+ */
+router.post("/refresh", async (req: Request, res: Response): Promise<void> => {
+    const logger = req.app.get("logger") as winston.Logger;
+    const redis = req.app.get("redis") as Redis;
+    const { refreshToken } = req.body;
+
     try {
-        const userId = req.user?.id;
-        const user = await User.findById(userId);
-        if (!user || !user.isActive || !user.facebookAccessToken) {
-            res.status(404).json({ error: "Người dùng chưa kết nối Facebook hoặc tài khoản bị khóa" });
+        if (!refreshToken) {
+            res.status(400).json({ error: "Thiếu refreshToken" });
             return;
         }
-        const { data } = await axios.get(`https://graph.facebook.com/v23.0/oauth/access_token`, {
-            params: {
-                grant_type: "fb_exchange_token",
-                client_id: process.env.FB_APP_ID,
-                client_secret: process.env.FB_APP_SECRET,
-                fb_exchange_token: user.facebookAccessToken,
-            },
-        });
-        user.facebookAccessToken = data.access_token;
-        await user.save();
-        res.json({ success: true });
-    } catch (err: any) {
-        console.error("❌ Error refreshing access token:", err?.response?.data || err.message);
-        const errorMessage = err.response?.data?.error?.message || "Không thể làm mới access token";
-        const errorCode = err.response?.data?.error?.code;
+
+        const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET || "default-refresh-secret") as { id: string };
+        const cachedToken = await redis.get(`refresh_token:${decoded.id}`);
+        if (cachedToken !== refreshToken) {
+            res.status(401).json({ error: "Refresh token không hợp lệ hoặc đã hết hạn" });
+            return;
+        }
+
+        const user = await User.findById(decoded.id).lean();
+        if (!user || !user.isActive) {
+            res.status(401).json({ error: "Người dùng không tồn tại hoặc bị khóa" });
+            return;
+        }
+
+        const newToken = jwt.sign(
+            { id: user._id, username: user.name, role: user.role },
+            process.env.JWT_SECRET || "default-secret-key",
+            { expiresIn: "1h" }
+        );
+
+        logger.info("Token refreshed", { userId: user._id });
+        res.json({ token: newToken });
+    } catch (error: any) {
+        logger.error("Error refreshing token", { error: error.message });
+        res.status(401).json({ error: "Không thể làm mới token", detail: error.message });
+    }
+});
+
+/**
+ * Facebook login
+ * @route POST /auth/facebook
+ * @body {accessToken}
+ */
+router.post("/facebook", async (req: Request, res: Response): Promise<void> => {
+    const logger = req.app.get("logger") as winston.Logger;
+    const redis = req.app.get("redis") as Redis;
+    const { accessToken } = req.body as FacebookLoginBody;
+
+    try {
+        if (!accessToken) {
+            res.status(400).json({ error: "Thiếu accessToken" });
+            return;
+        }
+
+        // Verify Facebook access token
+        const { data } = await axios.get(`https://graph.facebook.com/me?access_token=${accessToken}&fields=id,name,email`);
+        if (!data.id || !data.email) {
+            res.status(400).json({ error: "Access token không hợp lệ" });
+            return;
+        }
+
+        let user = await User.findOne({ facebookId: data.id });
+        if (!user) {
+            user = await User.findOne({ email: data.email });
+            if (user) {
+                // Link existing user with Facebook
+                user.facebookId = data.id;
+                user.facebookAccessToken = accessToken;
+                await user.save();
+            } else {
+                // Create new user
+                const defaultPackage = await Package.findOne({ name: "basic" }).lean();
+                if (!defaultPackage) {
+                    res.status(500).json({ error: "Gói dịch vụ mặc định không tồn tại" });
+                    return;
+                }
+
+                user = new User({
+                    name: data.name,
+                    email: data.email,
+                    password: await bcrypt.hash(Math.random().toString(36).slice(2), 10), // Random password
+                    facebookId: data.id,
+                    facebookAccessToken: accessToken,
+                    role: "user",
+                    package: "basic",
+                    isActive: true,
+                });
+                await user.save();
+            }
+        }
+
+        if (!user.isActive) {
+            res.status(403).json({ error: "Tài khoản bị khóa" });
+            return;
+        }
+
+        const token = jwt.sign(
+            { id: user._id, username: user.name, role: user.role },
+            process.env.JWT_SECRET || "default-secret-key",
+            { expiresIn: "1h" }
+        );
+
+        const refreshToken = jwt.sign(
+            { id: user._id },
+            process.env.JWT_REFRESH_SECRET || "default-refresh-secret",
+            { expiresIn: "7d" }
+        );
+
+        await redis.setex(`refresh_token:${user._id}`, 7 * 24 * 60 * 60, refreshToken); // Cache refresh token for 7 days
+
+        logger.info("Facebook login successful", { userId: user._id, email: user.email });
+        res.json({ token, refreshToken, user: { id: user._id, name: user.name, email: user.email, role: user.role } });
+    } catch (error: any) {
+        logger.error("Error in Facebook login", { error: error.message });
+        const errorCode = error.response?.data?.error?.code;
         if (errorCode === 190) {
-            res.status(400).json({ error: "Token không hợp lệ", detail: errorMessage });
-        } else if (errorCode === 4) {
-            res.status(429).json({ error: "Đã vượt quá giới hạn API. Vui lòng thử lại sau.", detail: errorMessage });
+            res.status(400).json({ error: "Access token không hợp lệ hoặc đã hết hạn" });
         } else {
-            res.status(500).json({ error: errorMessage, detail: err?.response?.data?.error?.message || err.message });
+            res.status(500).json({ error: "Không thể đăng nhập qua Facebook", detail: error.message });
         }
     }
 });
