@@ -18,13 +18,12 @@ const app = express();
 // Security headers
 app.use(helmet());
 
-// CORS configuration
+
 app.use(cors({
-    origin: process.env.NODE_ENV === "production"
-        ? ["https://your-frontend-domain.com"]
-        : ["http://localhost:3000"],
-    credentials: true
+    origin: '*', // hoặc 'http://localhost:3000',
+    credentials: true,
 }));
+
 
 // Rate limiting for sensitive endpoints
 const authLimiter = rateLimit({

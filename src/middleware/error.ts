@@ -18,9 +18,11 @@ export const errorMiddleware = (err: any, req: CustomRequest, res: Response, nex
     };
 
     logger.error("Error occurred", errorDetails);
-
     res.status(errorDetails.status).json({
         error: errorDetails.message,
         detail: process.env.NODE_ENV === "development" ? err.stack : undefined,
+
     });
+    logger.error("🔥 Full error caught", err);
+
 };

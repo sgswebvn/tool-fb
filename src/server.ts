@@ -15,7 +15,7 @@ redis.on("error", () => logger.error("Redis error"));
 
 const server = http.createServer(app);
 const io = new Server(server, {
-    cors: { origin: process.env.NODE_ENV === "production" ? "https://your-frontend-domain.com" : "*" },
+    cors: { origin: process.env.NODE_ENV === "production" ? "http://localhost:3000" : "*" },
     connectionStateRecovery: {
         maxDisconnectionDuration: 2 * 60 * 1000, // 2 minutes
         skipMiddlewares: true
@@ -33,7 +33,7 @@ io.on("connection", (socket: Socket) => {
     logger.info("A user connected", { userId: socket.data?.user?.id });
 });
 
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3002;
 
 mongoose.connect(process.env.MONGO_URI as string).then(() => {
     logger.info("✅ MongoDB connected");
