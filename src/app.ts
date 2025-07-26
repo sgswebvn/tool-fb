@@ -15,15 +15,15 @@ import { errorMiddleware } from "./middleware/error";
 
 const app = express();
 
-// Security headers
-app.use(helmet());
 
 
 app.use(cors({
-    origin: '*', // hoặc 'http://localhost:3000',
+    origin: 'http://localhost:3000',
     credentials: true,
 }));
 
+// Security headers
+app.use(helmet());
 
 // Rate limiting for sensitive endpoints
 const authLimiter = rateLimit({
