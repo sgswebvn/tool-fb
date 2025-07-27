@@ -36,6 +36,9 @@ app.use("/auth", authLimiter);
 // Body parsers
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
+app.get("/", (req, res) => {
+    res.json({ message: "Backend API is running" });
+});
 
 // Routes
 app.use("/auth", authRoutes);

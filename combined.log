@@ -16,3 +16,13 @@
 {"level":"info","message":"🚀 Server running at http://localhost:3002","timestamp":"2025-07-25T17:59:24.837Z"}
 {"email":"admin@gmail.com","level":"info","message":"User logged in","timestamp":"2025-07-25T18:00:17.110Z","userId":"6883bbf5f06939d037f03b9f"}
 {"level":"info","message":"✅ Redis connected","timestamp":"2025-07-25T18:10:41.872Z"}
+{"level":"info","message":"✅ Redis connected","timestamp":"2025-07-27T06:07:11.993Z"}
+{"level":"info","message":"✅ MongoDB connected","timestamp":"2025-07-27T06:07:12.391Z"}
+{"level":"info","message":"✅ Redis connected","timestamp":"2025-07-27T06:07:24.856Z"}
+{"level":"info","message":"✅ MongoDB connected","timestamp":"2025-07-27T06:07:25.079Z"}
+{"level":"info","message":"✅ Redis connected","timestamp":"2025-07-27T06:07:48.858Z"}
+{"level":"info","message":"✅ MongoDB connected","timestamp":"2025-07-27T06:07:49.366Z"}
+{"level":"info","message":"🚀 Server running at http://localhost:3002","timestamp":"2025-07-27T06:07:49.371Z"}
+{"level":"info","message":"✅ Redis connected","timestamp":"2025-07-27T06:09:13.822Z"}
+{"level":"info","message":"✅ MongoDB connected","timestamp":"2025-07-27T06:09:14.155Z"}
+{"level":"info","message":"🚀 Server running at http://localhost:3002","timestamp":"2025-07-27T06:09:14.160Z"}
