@@ -9,7 +9,10 @@ import messageRoutes, { setupSocketHandlers } from "./routes/messages";
 import logger from "./logger"; // Import logger
 
 // Initialize Redis
-const redis = new Redis(process.env.REDIS_URL || "redis://localhost:6379");
+const redisUrl = process.env.REDIS_URL || "redis://localhost:6379";
+const isSecure = redisUrl.startsWith("rediss://");
+
+const redis = new Redis(redisUrl, isSecure ? { tls: {} } : {});
 redis.on("connect", () => logger.info("✅ Redis connected"));
 redis.on("error", () => logger.error("Redis error"));
 
